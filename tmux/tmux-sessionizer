@@ -156,16 +156,28 @@ delete_fzf_preview=$(
 EOF
 )
 
+# just to simplify fzf styling
+fzf_default_opts=(
+  --bind "ctrl-j:down,ctrl-k:up"
+  --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
+  --border=rounded
+  --border-label=tmux-sessionizer
+  --border-label-pos=0
+  --padding=1
+  --reverse
+  --cycle
+  --prompt="> "
+  --margin="$MARGIN"
+  --height "$HEIGHT"
+  --header="Current Session: $current_session | Total: $tmux_sessions_count"
+)
+
 if [[ $# -eq 1 ]]; then
   selected="$1"
 else
   selected=$(
     find_dirs | fzf \
-      --border=rounded \
-      --margin=$MARGIN \
-      --padding=1 \
-      --header="Current Session: $current_session | Total: $tmux_sessions_count" \
-      --height $HEIGHT --reverse --prompt="> " \
+      "${fzf_default_opts[@]}" \
       --preview "$fzf_preview"
   )
 fi
@@ -193,11 +205,8 @@ if [[ "$selected" == "[DEL]" ]]; then
       echo "[ALL]"
       tmux list-sessions -F '#S'
     ) | fzf \
-      --border=rounded \
-      --margin=$MARGIN \
-      --padding=1 \
-      --header="Current Session: $current_session | Total: $tmux_sessions_count" \
-      --height $HEIGHT --reverse --border --prompt "del > " \
+      "${fzf_default_opts[@]}" \
+      --prompt "del > " \
       --preview "$delete_fzf_preview"
   )
   if [[ -n "$session_to_del" ]]; then
