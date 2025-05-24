@@ -12,6 +12,11 @@ CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 # TS_EXTRA_SEARCH_PATHS=(~/ghq:3 ~/Git:3 ~/.config:2)
 # # if set this override the TS_MAX_DEPTH (1)
 # TS_MAX_DEPTH=2
+TS_SEARCH_PATHS=(~/ ~/personal)
+TS_EXTRA_SEARCH_PATHS=()
+TS_MAX_DEPTH=1
+MARGIN=1,1
+HEIGHT=100%
 # ------------------------
 
 # test if the config file exists
@@ -54,9 +59,6 @@ hydrate() {
 
 sanity_check
 
-# if TS_SEARCH_PATHS is not set use default
-[[ -n "$TS_SEARCH_PATHS" ]] || TS_SEARCH_PATHS=(~/ ~/personal)
-
 # Add any extra search paths to the TS_SEARCH_PATHS array
 # e.g : EXTRA_SEARCH_PATHS=("$HOME/extra1:4" "$HOME/extra2")
 # note : Path can be suffixed with :number to limit or extend the depth of the search for the Path
@@ -74,9 +76,12 @@ else
 fi
 # utility function to find directories
 find_dirs() {
+  # new session option
+  echo "[NEW]"
+
   # show delete session option if there is tmux
   if [[ "$tmux_sessions_count" -gt 0 ]]; then
-    echo "[DEL SESSION]"
+    echo "[DEL]"
   fi
 
   # list TMUX sessions
@@ -105,6 +110,7 @@ find_dirs() {
 
     if [[ -d "$path" ]]; then
       while IFS= read -r dir; do
+        dir=$(echo "$dir" | sed "s|$HOME|~|g") # path formatting
         all_dirs+=("$dir")
       done < <(
         find "$path" -mindepth 1 -maxdepth "${depth:-${TS_MAX_DEPTH:-1}}" \
@@ -124,17 +130,43 @@ find_dirs() {
   printf "%s\n" "${all_dirs[@]}" | sort
 }
 
+# just to simplify preview script
+# todo: look into better way for ls/exa
+fzf_preview=$(
+  cat <<'EOF'
+  case {} in
+    "[NEW]") echo "Create a new session" ;;
+    "[DEL]") echo "Delete a session"; tmux list-sessions -F "- #S" ;;
+    "[TMUX]"*) tmux list-windows -t "$(echo {} | sed "s/^\[TMUX\] //")" \
+      -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
+    "~"*) echo {}; path={}; \
+      eval /bin/exa -1 --icons --group-directories-first "$path";;
+    *) echo "No preview available" ;;
+  esac
+EOF
+)
+
+delete_fzf_preview=$(
+  cat <<'EOF'
+  case {} in
+    "[ALL]") echo "Delete all sessions except current one" ;;
+    *) tmux list-windows -t "$(echo {} | sed "s/^\[TMUX\] //")" \
+      -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
+  esac
+EOF
+)
+
 if [[ $# -eq 1 ]]; then
   selected="$1"
 else
   selected=$(
     find_dirs | fzf \
       --border=rounded \
-      --margin=0,50 \
+      --margin=$MARGIN \
       --padding=1 \
       --header="Current Session: $current_session | Total: $tmux_sessions_count" \
-      --height ~70% --reverse --prompt="> " \
-      --preview 'tmux list-windows -F "#I - #W#F" -t $(echo {} | sed "s/^\[TMUX\] //") 2>/dev/null'
+      --height $HEIGHT --reverse --prompt="> " \
+      --preview "$fzf_preview"
   )
 fi
 
@@ -142,20 +174,44 @@ if [[ -z $selected ]]; then
   exit 0
 fi
 
-if [[ "$selected" == "[DEL SESSION]" ]]; then
+if [[ "$selected" == "[NEW]" ]]; then
+  # prompt w/o tmux
+  if [[ -z $TMUX ]]; then
+    read -p "name > " session_name
+    tmux new-session -ds "$session_name"
+    switch_to "$session_name"
+  # run in tmux
+  else
+    tmux command-prompt -p "name > " "run-shell 'tmux new-session -ds %1 && tmux switch-client -t %1'"
+  fi
+  exit 0
+fi
+
+if [[ "$selected" == "[DEL]" ]]; then
   session_to_del=$(
-    tmux list-sessions -F '#S' | fzf \
+    (
+      echo "[ALL]"
+      tmux list-sessions -F '#S'
+    ) | fzf \
       --border=rounded \
-      --margin=0,50 \
+      --margin=$MARGIN \
       --padding=1 \
       --header="Current Session: $current_session | Total: $tmux_sessions_count" \
-      --height ~70% --reverse --border --prompt "del > " \
-      --preview 'tmux list-windows -F "#I - #W#F" -t $(echo {} | sed "s/^\[TMUX\] //") 2>/dev/null'
-
+      --height $HEIGHT --reverse --border --prompt "del > " \
+      --preview "$delete_fzf_preview"
   )
   if [[ -n "$session_to_del" ]]; then
-    tmux kill-session -t "$session_to_del"
-    echo "Session '$session_to_del' deleted."
+    # delete all session except current one
+    if [[ "$session_to_del" == "[ALL]" ]]; then
+      all_sessions=$(tmux list-sessions -F '#S' | grep -v "^$current_session$")
+      for s in $all_sessions; do
+        tmux kill-session -t "$s"
+      done
+    # delete specific session
+    else
+      tmux kill-session -t "$session_to_del"
+      echo "Session '$session_to_del' deleted."
+    fi
   fi
   exit 0
 fi
