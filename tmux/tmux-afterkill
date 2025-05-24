@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+cur=$(tmux display-message -p '#I')
+
+for i in $(tmux list-windows -F '#I'); do
+  if [ "$i" -gt "$cur" ]; then
+    tmux kill-window -t "$i"
+  fi
+done
