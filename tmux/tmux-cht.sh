@@ -31,12 +31,12 @@ query=$(
   fzf \
     "${fzf_default_opts[@]}" \
     --print-query \
-    --prompt="query > " \
+    --prompt="$selected - query > " \
     --border-label="cht.sh query" \
     --height=10% </dev/null
 )
 
-if grep -qs "$selected" ~/.tmux-cht-languages; then
+if grep -qs "$selected" $CONFIG_HOME/tmux/.tmux-cht-lang; then
   query=$(echo $query | tr ' ' '+')
   tmux neww bash -c "echo \"curl cht.sh/$selected/$query/\" & curl cht.sh/$selected/$query & while [ : ]; do sleep 1; done"
 else

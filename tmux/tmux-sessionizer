@@ -231,6 +231,7 @@ fi
 
 selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
+selected=$(echo "$selected" | sed "s|^~|$HOME|") # expand path fully
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
   tmux new-session -ds "$selected_name" -c "$selected"

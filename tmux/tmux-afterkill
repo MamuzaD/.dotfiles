@@ -7,3 +7,5 @@ for i in $(tmux list-windows -F '#I'); do
     tmux kill-window -t "$i"
   fi
 done
+
+tmux display-message -d 2000 "Killed windows after: $cur"
