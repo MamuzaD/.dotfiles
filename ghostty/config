@@ -1,2 +1,23 @@
+# default font family is JetBrains Mono
+# font-family = Hack Nerd Font Mono
+# font-family = ZedMono Nerd Font Mono
+# font-family = MesloLGS NF
+# font-family = GohuFont 14 Nerd Font Mono
+# font-family = Monocraft
+# font-family = Berkeley Mono Trial
+
 theme = tokyonight
 font-size = 14
+background-opacity = 0.9
+background-blur = 20
+cursor-style = block
+
+# icon
+macos-icon = xray
+# macos-icon-frame =
+# macos-icon-ghost-color =
+# macos-icon-screen-color =
+
+# keybinds
+keybind = cmd+q=quit
+keybind = cmd+w=close_tab

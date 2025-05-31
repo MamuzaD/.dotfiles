@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 
-cur=$(tmux display-message -p '#I')
+curr=$(tmux display-message -p '#I')
+max=$(tmux list-windows -F '#I' | sort -n | tail -n 1)
+total=$((max - curr))
 
-for i in $(tmux list-windows -F '#I'); do
-  if [ "$i" -gt "$cur" ]; then
-    tmux kill-window -t "$i"
-  fi
+if [ "$total" -le 0 ]; then
+  tmux display-message -d 2000 "afterkill: none to kill after ${curr}"
+  exit 0
+fi
+
+for ((i = max; i > curr; i--)); do
+  tmux kill-window -t "$i"
 done
 
-tmux display-message -d 2000 "Killed windows after: $cur"
+if [ "$total" -eq 1 ]; then
+  tmux display-message -d 3000 "afterkill: killed ${total} window after ${curr}"
+else
+  tmux display-message -d 3000 "afterkill: killed ${total} windows after ${curr}"
+fi

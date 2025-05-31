@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+FG="#E4E4E4"
+
+source
+
+cd "$1" 2>/dev/null || exit 1
+
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  exit 0
+fi
+
+branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+if [ -n "$branch" ]; then
+  branch=${branch#*/} # remove everything before first slash
+else
+  branch=$(git describe --tags --exact-match 2>/dev/null)
+  [ -z "$branch" ] && branch="@$(git rev-parse --short HEAD 2>/dev/null)"
+fi
+
+git_status=$(git status --porcelain 2>/dev/null)
+staged=$(echo "$git_status" | grep -c "^[AMDR]")
+unstaged=$(echo "$git_status" | grep -c "^.[MD]")
+untracked=$(echo "$git_status" | grep -c "^??")
+
+ahead_behind=$(git rev-list --left-right --count HEAD...@{upstream} 2>/dev/null)
+if [ -n "$ahead_behind" ]; then
+  ahead=$(echo "$ahead_behind" | cut -f1)
+  behind=$(echo "$ahead_behind" | cut -f2)
+else
+  ahead=0
+  behind=0
+fi
+
+stashes=$(git stash list 2>/dev/null | wc -l | tr -d ' ')
+
+symbols=""
+[ "$ahead" -gt 0 ] && symbols="${symbols} ⇡${ahead}"
+[ "$behind" -gt 0 ] && symbols="${symbols} ⇣${behind}"
+[ "$staged" -gt 0 ] && symbols="${symbols} +${staged}"
+[ "$stashes" -gt 0 ] && symbols="${symbols} *${stashes}"
+[ "$unstaged" -gt 0 ] && symbols="${symbols} !${unstaged}"
+[ "$untracked" -gt 0 ] && symbols="${symbols} ?${untracked}"
+
+symbols=$(echo "$symbols" | sed 's/^ *//')
+
+if [ "$staged" -gt 0 ] || [ "$unstaged" -gt 0 ]; then
+  if [ "$untracked" -gt 0 ] && [ "$staged" -gt 0 ]; then
+    bg="colour160" # red - mixed state
+  elif [ "$staged" -gt 0 ]; then
+    bg="colour208" # orange - staged changes
+  elif [ "$unstaged" -gt 0 ]; then
+    bg="colour214" # yellow - unstaged changes
+  fi
+else
+  bg="colour34"
+fi
+
+if [ -n "$symbols" ]; then
+  printf "#[fg=%s,bg=%s,bold]  %s %s  #[default]" "$FG" "$bg" "$branch" "$symbols"
+else
+  printf "#[fg=%s,bg=%s,bold]  %s  #[default]" "$FG" "$bg" "$branch"
+fi

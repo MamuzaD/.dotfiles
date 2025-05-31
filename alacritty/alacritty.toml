@@ -1,17 +1,10 @@
 # Font
 [font]
 size = 11.25
-
-[font.normal]
-family = "GeistMono NFM"
-style = "Regular"
-
-# Key Bindings
-# [keyboard]
-# bindings = [
-#   { key = "V", mods = "Control", action = "Paste" },
-#   { key = "C", mods = "Control", action = "Copy" }
-# ]
+# geist
+# normal = { fmaily = "GeistMono NFM", style = "Regular" }
+# minecraft
+# normal = { family = "Monocraft Nerd Font", style = "Book" }
 
 # Window
 [window]
@@ -53,7 +46,5 @@ TERM = "xterm-256color"
 
 # Debian
 [terminal.shell]
-# program = "C:\\Windows\\System32\\wsl.exe"
-# args = ["-d", "Debian", "~"]
 program = "debian"
 
