@@ -13,7 +13,7 @@ Possible choices
 - dracula, dracula-soft
 ]]
 
-local colorscheme = "rose-pine"
+local colorscheme = "tokyonight"
 
 return {
   {

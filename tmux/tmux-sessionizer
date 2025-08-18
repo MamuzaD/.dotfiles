@@ -14,6 +14,7 @@ CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 # TS_MAX_DEPTH=2
 TS_SEARCH_PATHS=(~/ ~/personal)
 TS_EXTRA_SEARCH_PATHS=()
+TS_SPECIFIC_PATHS=()
 TS_MAX_DEPTH=1
 MARGIN=1,1
 HEIGHT=100%
@@ -76,13 +77,6 @@ else
 fi
 # utility function to find directories
 find_dirs() {
-  # new session option
-  echo "[NEW]"
-
-  # show delete session option if there is tmux
-  if [[ "$tmux_sessions_count" -gt 0 ]]; then
-    echo "[DEL]"
-  fi
 
   # list TMUX sessions
   if [[ -n "${TMUX}" ]]; then
@@ -95,10 +89,32 @@ find_dirs() {
     echo "$tmux_sessions_arr" | sort
   fi
 
+  # new session option
+  echo "[NEW]"
+
+  # show delete session option if there is tmux
+  if [[ "$tmux_sessions_count" -gt 0 ]]; then
+    echo "[DEL]"
+  fi
+
   # note: TS_SEARCH_PATHS is an array of paths to search for directories
   # if the path ends with :number, it will search for directories with a max depth of number ;)
   # if there is no number, it will search for directories with a max depth defined by TS_MAX_DEPTH or 1 if not set
   all_dirs=()
+
+  if [[ ${#TS_SPECIFIC_PATHS[@]} -gt 0 ]]; then
+    for specific_path in "${TS_SPECIFIC_PATHS[@]}"; do
+      # Expand tilde and check if directory exists
+      local full_path
+      full_path=$(eval echo "$specific_path") # Expand tilde and shell variables
+
+      if [[ -d "$full_path" ]]; then
+        # Add the full path, then format it with tilde for display
+        all_dirs+=("$(echo "$full_path" | sed "s|$HOME|~|g")")
+      fi
+    done
+  fi
+
   for entry in "${TS_SEARCH_PATHS[@]}"; do
     # Check if entry as :number as suffix then adapt the maxdepth parameter
     if [[ "$entry" =~ ^([^:]+):([0-9]+)$ ]]; then
@@ -132,29 +148,25 @@ find_dirs() {
 
 # just to simplify preview script
 # todo: look into better way for ls/exa
-fzf_preview=$(
-  cat <<'EOF'
+fzf_preview='
   case {} in
     "[NEW]") echo "Create a new session" ;;
     "[DEL]") echo "Delete a session"; tmux list-sessions -F "- #S" ;;
     "[TMUX]"*) tmux list-windows -t "$(echo {} | sed "s/^\[TMUX\] //")" \
       -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
     "~"*) echo {}; path={}; \
-      eval /bin/exa -1 --icons --group-directories-first "$path";;
+      eval /bin/ls "$path" | /usr/bin/sed "s/^/- /";;
     *) echo "No preview available" ;;
   esac
-EOF
-)
+'
 
-delete_fzf_preview=$(
-  cat <<'EOF'
+delete_fzf_preview='
   case {} in
     "[ALL]") echo "Delete all sessions except current one" ;;
     *) tmux list-windows -t "$(echo {} | sed "s/^\[TMUX\] //")" \
       -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
   esac
-EOF
-)
+'
 
 # just to simplify fzf styling
 fzf_default_opts=(
@@ -231,7 +243,15 @@ fi
 
 selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
-selected=$(echo "$selected" | sed "s|^~|$HOME|") # expand path fully
+selected=$(echo "$selected" | sed "s|^~|$HOME|") # expand path back if it has '~'
+
+if [[ "$selected" == "kill" ]]; then
+  if [[ -n $tmux_running ]]; then
+    tmux kill-server
+  fi
+  echo "Killed all sessions"
+  exit 0
+fi
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
   tmux new-session -ds "$selected_name" -c "$selected"

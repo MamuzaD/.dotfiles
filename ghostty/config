@@ -1,19 +1,26 @@
-# default font family is JetBrains Mono
 # font-family = Hack Nerd Font Mono
-# font-family = ZedMono Nerd Font Mono
-# font-family = MesloLGS NF
-# font-family = GohuFont 14 Nerd Font Mono
-# font-family = Monocraft
 # font-family = Berkeley Mono Trial
 
+# font-family = JetBrainsMono Nerd Font # ghostty default
+# font-family = ZedMono Nerd Font Mono
+# font-family = MesloLGS NF
+# font-family = UbuntuMono Nerd Font
+# font-family = FiraCode Nerd Font Mono
+# font-family = GeistMono Nerd Font Mono
+# font-family = Iosevka Nerd Font Mono
+
+# font-family = GohuFont 14 Nerd Font Mono
+# font-family = Monocraft
+
+# theme = catppuccin
 theme = tokyonight
 font-size = 14
 background-opacity = 0.9
 background-blur = 20
-cursor-style = block
+cursor-style = block 
 
 # icon
-macos-icon = xray
+# macos-icon = xray
 # macos-icon-frame =
 # macos-icon-ghost-color =
 # macos-icon-screen-color =

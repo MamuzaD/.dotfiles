@@ -6,6 +6,7 @@ chown
 cp
 docker
 docker-compose
+ffmpeg
 find
 git
 git-commit

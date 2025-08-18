@@ -13,8 +13,6 @@ fzf_default_opts=(
   --reverse
   --cycle
   --prompt="> "
-  --margin=0,13%
-  --height ~80%
   --bind=tab:accept
 )
 
@@ -31,14 +29,17 @@ query=$(
   fzf \
     "${fzf_default_opts[@]}" \
     --print-query \
-    --prompt="$selected - query > " \
+    --prompt="query > " \
     --border-label="cht.sh query" \
     --height=10% </dev/null
 )
 
 if grep -qs "$selected" $CONFIG_HOME/tmux/.tmux-cht-lang; then
   query=$(echo $query | tr ' ' '+')
-  tmux neww bash -c "echo \"curl cht.sh/$selected/$query/\" & curl cht.sh/$selected/$query & while [ : ]; do sleep 1; done"
+
+  printf "%s\n" "cht.sh/$selected/$query"
+
+  tmux neww zsh -c "echo \"curl cht.sh/$selected/$query/\" & curl cht.sh/$selected/$query & while [ : ]; do sleep 1; done"
 else
-  tmux neww bash -c "curl -s cht.sh/$selected~$query | less"
+  tmux neww zsh -c "curl -s cht.sh/$selected~$query | less"
 fi
