@@ -185,7 +185,19 @@ fzf_default_opts=(
 )
 
 if [[ $# -eq 1 ]]; then
-  selected="$1"
+  arg="$1"
+  # Expand ~ and env vars (for testing path-ness)
+  expanded_arg="$(eval echo "$arg")"
+  # If arg is absolute, ~-prefixed, or relative and resolves to an existing dir, use it as path.
+  if [[ "$expanded_arg" == /* || "$arg" == "~"* || -d "$expanded_arg" ]]; then
+    selected="$expanded_arg"
+    # Session name from the path
+    selected_name="$(basename "$selected" | tr . _)"
+  else
+    # Not a path: treat as session name, use current directory as the path
+    selected_name="$(echo "$arg" | tr . _)"
+    selected="$1"
+  fi
 else
   selected=$(
     find_dirs | fzf \
@@ -197,6 +209,8 @@ fi
 if [[ -z $selected ]]; then
   exit 0
 fi
+
+selected_name=$(basename "$selected" | tr . _)
 
 if [[ "$selected" == "[NEW]" ]]; then
   # prompt w/o tmux
@@ -239,9 +253,9 @@ fi
 
 if [[ "$selected" =~ ^\[TMUX\]\ (.+)$ ]]; then
   selected="${BASH_REMATCH[1]}"
+  selected_name="$selected"
 fi
 
-selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
 selected=$(echo "$selected" | sed "s|^~|$HOME|") # expand path back if it has '~'
 

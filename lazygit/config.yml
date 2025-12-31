@@ -1,0 +1,64 @@
+gui:
+  # screen
+  screenMode: normal
+  mainPanelSplitMode: flexible # horizontal | vertical | flexible
+  sidePanelWidth: 0.20
+  expandFocusedSidePanel: true
+  expandedSidePanelWeight: 2
+  # git
+  commitLength:
+    show: true
+    warnAt: 72
+  theme:
+    lightTheme: false
+    activeBorderColor:
+      - "#7AA2F7"
+      - bold
+  authorColors: {} # fill if you want per-author colors
+  skipHookPrefix: "skip-ci" # skip hooks
+  # ui
+  nerdFontsVersion: "3"
+  showIcons: true
+  showFileIcons: true
+  showRandomTip: true
+  showCommandLog: true
+  showBottomLine: true
+  showPanelJumps: false
+  mouseEvents: true
+git:
+  pagers:
+    - colorArg: always
+      pager: delta --paging=never --line-numbers
+  merging:
+    manualCommit: false
+    args: "--no-ff"
+  branchLogCmd: "git log --graph --color=always --decorate --oneline --date=relative {{branchName}} --"
+keybinding:
+  files:
+    commitChangesWithEditor: "<disabled>"
+  committing:
+    commitChangesWithEditor: "<disabled>"
+customCommands:
+  - key: "C"
+    context: "global"
+    description: "Commit with Conventional Commit prompt"
+    prompts:
+      - type: "menu"
+        title: "type"
+        options:
+          - value: "feat"
+          - value: "fix"
+          - value: "docs"
+          - value: "chore"
+          - value: "refactor"
+          - value: "test"
+      - type: "input"
+        title: "message"
+    command: >
+      bash -lc ' t="{{index .PromptResponses 0}}"; m="{{index .PromptResponses 1}}"; git commit -m "$t: $m" '
+
+update:
+  method: prompt
+os:
+  editPreset: "nvim"
+  open: "open {{filename}}" # linux: xdg-open, widnows: start
