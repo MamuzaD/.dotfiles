@@ -73,7 +73,7 @@ tmux_sessions_count=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null
 if [[ -n "${TMUX}" ]]; then
   current_session=$(tmux display-message -p '#S')
 else
-  currrent_session="none"
+  current_session="none"
 fi
 # utility function to find directories
 find_dirs() {
@@ -196,7 +196,7 @@ if [[ $# -eq 1 ]]; then
   else
     # Not a path: treat as session name, use current directory as the path
     selected_name="$(echo "$arg" | tr . _)"
-    selected="$1"
+    selected="$PWD"
   fi
 else
   selected=$(
@@ -204,13 +204,13 @@ else
       "${fzf_default_opts[@]}" \
       --preview "$fzf_preview"
   )
+
+  selected_name=$(basename "$selected" | tr . _)
 fi
 
 if [[ -z $selected ]]; then
   exit 0
 fi
-
-selected_name=$(basename "$selected" | tr . _)
 
 if [[ "$selected" == "[NEW]" ]]; then
   # prompt w/o tmux
@@ -226,28 +226,36 @@ if [[ "$selected" == "[NEW]" ]]; then
 fi
 
 if [[ "$selected" == "[DEL]" ]]; then
-  session_to_del=$(
-    (
-      echo "[ALL]"
-      tmux list-sessions -F '#S'
-    ) | fzf \
-      "${fzf_default_opts[@]}" \
-      --prompt "del > " \
-      --preview "$delete_fzf_preview"
-  )
-  if [[ -n "$session_to_del" ]]; then
-    # delete all session except current one
+  while true; do
+    session_to_del=$(
+      (
+        echo "[ALL]"
+        # list sessions, excluding current so you can't delete it by mistake
+        tmux list-sessions -F '#S' | grep -v "^$current_session$"
+      ) | fzf \
+        "${fzf_default_opts[@]}" \
+        --prompt "del > " \
+        --preview "$delete_fzf_preview"
+    )
+
+    # user pressed ESC / no selection
+    if [[ -z "$session_to_del" ]]; then
+      break
+    fi
+
     if [[ "$session_to_del" == "[ALL]" ]]; then
+      # delete all sessions except current one
       all_sessions=$(tmux list-sessions -F '#S' | grep -v "^$current_session$")
       for s in $all_sessions; do
         tmux kill-session -t "$s"
       done
-    # delete specific session
+      break
     else
-      tmux kill-session -t "$session_to_del"
-      echo "Session '$session_to_del' deleted."
+      # delete chosen session (guaranteed not current due to grep -v above)
+      tmux kill-session -t "$session_to_del" 2>/dev/null
     fi
-  fi
+  done
+
   exit 0
 fi
 

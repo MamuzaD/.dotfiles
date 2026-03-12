@@ -1,0 +1,79 @@
+#!/usr/bin/env zsh
+set -euo pipefail
+
+
+DIR="$HOME/Pictures/Wallpapers"
+
+typeset -a files
+files=()
+
+# Robustly gather files (handles spaces/tabs safely)
+while IFS= read -r -d '' f; do
+  files+=("$f")
+done < <(
+  find "$DIR" -type f \( \
+    -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' -o \
+    -iname '*.tif' -o -iname '*.tiff' -o -iname '*.gif' -o -iname '*.bmp' -o \
+    -iname '*.webp' \
+  \) -print0
+)
+
+if (( ${#files} == 0 )); then
+  print -u2 "no images found in: $DIR"
+  exit 1
+fi
+
+current="$(
+  osascript -e 'tell application "System Events" to get picture of item 1 of desktops' \
+    2>/dev/null || true
+)"
+
+
+chosen=""
+
+if ! command -v fzf >/dev/null 2>&1; then
+  print -u2 "fzf not found (required for -i)"
+  exit 1
+fi
+
+selected="$(
+  for f in "${files[@]}"; do
+    f_abs="${f:A}"
+    label="${f:t}"
+    [[ "$f_abs" == "$current" ]] && label=$'\e[1m\e[48;2;27;37;56m\e[38;2;122;162;247m'"${label}"$'\e[0m' 
+    printf '%s\t%s\n' "$label" "$f"
+  done | fzf \
+    --ansi \
+    --bind "j:down,k:up" \
+    --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538" \
+    --border=rounded \
+    --border-label=wallpaper \
+    --border-label-pos=0 \
+    --padding=1 \
+    --reverse \
+    --delimiter=$'\t' \
+    --with-nth=1 \
+    --prompt='> ' \
+    --height=100% \
+    --cycle \
+    --header="Current: ${current:t}" \
+    --preview='viu -w ${FZF_PREVIEW_COLUMNS} -h ${FZF_PREVIEW_LINES} {2}' \
+    --preview-window=right:60%
+)" || exit 0
+
+
+chosen="${selected#*$'\t'}"
+
+# Escape backslashes and quotes for AppleScript string literal
+escaped="${chosen//\\/\\\\}"
+escaped="${escaped//\"/\\\"}"
+
+osascript -e "tell application \"System Events\" to repeat with d in desktops
+  set picture of d to POSIX file \"${escaped}\"
+end repeat"
+
+if [[ -n "$TMUX" ]]; then
+  tmux display-message -d 300 "wallpaper: ${chosen:t}"
+else
+  print "wallpaper set to: ${chosen:t}"
+fi
