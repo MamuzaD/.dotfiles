@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOTFILES_DIR="$HOME/.config/!dotfiles"
+DOTFILES_DIR="$HOME/.config/dotfiles"
 LOCAL_BIN="$HOME/.local/bin"
 
 # dry-run
@@ -59,5 +59,13 @@ for script in "$DOTFILES_DIR"/tmux/tmux-*; do
     # chmod +x "$script"
     # link "$script" "$LOCAL_BIN/$(basename "$script")"
     :
+  fi
+done
+
+# --- general scripts ---
+for script in "$DOTFILES_DIR"/scripts/*; do
+  if [[ -x "$script" || "$script" == *.sh ]]; then
+    # link "$script" "$LOCAL_BIN/$(basename "$script")"
+    # chmod +x "$script"
   fi
 done
