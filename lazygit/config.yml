@@ -1,3 +1,4 @@
+notARepository: skip
 gui:
   # screen
   screenMode: normal
@@ -29,9 +30,9 @@ git:
   pagers:
     - colorArg: always
       pager: delta --paging=never --line-numbers
-  merging:
-    manualCommit: false
-    args: "--no-ff"
+  # merging:
+  #   manualCommit: false
+  #   args: "--no-ff"
   branchLogCmd: "git log --graph --color=always --decorate --oneline --date=relative {{branchName}} --"
 keybinding:
   files:

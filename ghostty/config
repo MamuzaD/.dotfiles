@@ -1,6 +1,6 @@
+# fonts
 # font-family = Hack Nerd Font Mono
 font-family = Berkeley Mono Trial
-
 # font-family = JetBrainsMono Nerd Font # ghostty default
 # font-family = ZedMono Nerd Font Mono
 # font-family = MesloLGS NF
@@ -8,12 +8,16 @@ font-family = Berkeley Mono Trial
 # font-family = FiraCode Nerd Font Mono
 # font-family = GeistMono Nerd Font Mono
 # font-family = Iosevka Nerd Font Mono
-
 # font-family = GohuFont 14 Nerd Font Mono
 # font-family = Monocraft
 
+# themes (ghostty +list-themes)
 # theme = catppuccin
 theme = tokyonight
+# theme = nord
+# theme = Rose Pine Moon
+
+# styles
 font-size = 14
 background-opacity = 0.8
 background-blur = 20

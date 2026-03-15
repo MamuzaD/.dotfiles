@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux-sessionizer"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux"
 CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 
 # config file example

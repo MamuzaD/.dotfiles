@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOTFILES_DIR="$HOME/.config/dotfiles"
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+DOTFILES_DIR="$XDG_CONFIG_HOME/dotfiles"
 LOCAL_BIN="$HOME/.local/bin"
 
 # dry-run
@@ -18,6 +19,7 @@ link() {
     echo "Would link $dest -> $src"
     return
   fi
+  mkdir -p "$(dirname "$dest")"
 
   # If dest exists and is not a symlink, back it up
   if [ -e "$dest" ] && [ ! -L "$dest" ]; then
@@ -32,26 +34,25 @@ link() {
 
 # --- terminal ---
 # ghostty | alacritty
-# link "$DOTFILES_DIR/ghostty" "$HOME/.config/ghostty"
-# link "$DOTFILES_DIR/alacritty" "$HOME/.config/alacritty"
+# link "$DOTFILES_DIR/ghostty/config" "$XDG_CONFIG_HOME/ghostty/config"
+# link "$DOTFILES_DIR/alacritty" "$XDG_CONFIG_HOME/alacritty"
 
 # --- zsh ---
 # link "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
 
 # --- nvim ---
-# link "$DOTFILES_DIR/nvim" "$HOME/.config/nvim"
+# link "$DOTFILES_DIR/nvim" "$XDG_CONFIG_HOME/nvim"
 
 # --- tmux config ---
-TMUX_DIR="$HOME/.config/tmux"
-# mkdir -p $TMUX_DIR
-# link "$DOTFILES_DIR/tmux/tmux.conf" "$TMUX_DIR/tmux.conf"
-# link "$DOTFILES_DIR/tmux/.tmux-cht-command" "$TMUX_DIR/.tmux-cht-command"
-# link "$DOTFILES_DIR/tmux/.tmux-cht-lang" "$TMUX_DIR/.tmux-cht-lang"
-# mkdir -p "$HOME/.config/tmux-sessionizer"
-# link "$DOTFILES_DIR/tmux/tmux-sessionizer.conf" "$HOME/.config/tmux-sessionizer/tmux-sessionizer.conf"
+# link "$DOTFILES_DIR/tmux/tmux.conf" "$XDG_CONFIG_HOME/tmux/tmux.conf"
+# link "$DOTFILES_DIR/tmux/.tmux-cht-command" "$XDG_CONFIG_HOME/tmux/.tmux-cht-command"
+# link "$DOTFILES_DIR/tmux/.tmux-cht-lang" "$XDG_CONFIG_HOME/tmux/.tmux-cht-lang"
+# link "$DOTFILES_DIR/tmux/tmux-sessionizer.conf" "$XDG_CONFIG_HOME/tmux/tmux-sessionizer.conf"
+
+# lazygit
+# link "$DOTFILES_DIR/lazygit/config.yml" "$XDG_CONFIG_HOME/lazygit/config.yml"
 
 # --- tmux scripts ---
-mkdir -p "$LOCAL_BIN"
 for script in "$DOTFILES_DIR"/tmux/tmux-*; do
   [[ "$script" == *.conf ]] && continue
 
@@ -67,5 +68,6 @@ for script in "$DOTFILES_DIR"/scripts/*; do
   if [[ -x "$script" || "$script" == *.sh ]]; then
     # link "$script" "$LOCAL_BIN/$(basename "$script")"
     # chmod +x "$script"
+    :
   fi
 done
