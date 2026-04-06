@@ -120,10 +120,8 @@ export XDG_CONFIG_HOME="$HOME/.config"
 # for local scripts
 export PATH="$HOME/.local/bin:$PATH"
 
-# nvm
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+# fnm
+eval "$(fnm env --use-on-cd --shell zsh)"
 
 # latex
 export PATH="/usr/local/texlive/2025basic/bin/universal-darwin:$PATH"
@@ -145,4 +143,3 @@ if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init zsh)"
 fi
 fpath+=~/.zfunc; autoload -Uz compinit; compinit
-
