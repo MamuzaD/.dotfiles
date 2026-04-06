@@ -1,0 +1,24 @@
+{
+  "manipulators": [
+    {
+      "description": "CHROME: Hyper + c (Cycle Windows)",
+      "from": {
+        "key_code": "c",
+        "modifiers": {
+          "mandatory": [
+            "left_command",
+            "left_control",
+            "left_option",
+            "left_shift"
+          ]
+        }
+      },
+      "to": [
+        {
+          "shell_command": "osascript -e 'if application \"Google Chrome\" is frontmost then' -e 'tell application \"Google Chrome\" to set index of window (count windows) to 1' -e 'else' -e 'activate application \"Google Chrome\"' -e 'end if'"
+        }
+      ],
+      "type": "basic"
+    }
+  ]
+}
