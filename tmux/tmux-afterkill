@@ -5,7 +5,7 @@ max=$(tmux list-windows -F '#I' | sort -n | tail -n 1)
 total=$((max - curr))
 
 if [ "$total" -le 0 ]; then
-  tmux display-message -d 2000 "afterkill: none to kill after ${curr}"
+  tmux display-message -d 750 "afterkill: none to kill after ${curr}"
   exit 0
 fi
 
@@ -14,7 +14,7 @@ for ((i = max; i > curr; i--)); do
 done
 
 if [ "$total" -eq 1 ]; then
-  tmux display-message -d 3000 "afterkill: killed ${total} window after ${curr}"
+  tmux display-message -d 750 "afterkill: killed ${total} window after ${curr}"
 else
-  tmux display-message -d 3000 "afterkill: killed ${total} windows after ${curr}"
+  tmux display-message -d 750 "afterkill: killed ${total} windows after ${curr}"
 fi

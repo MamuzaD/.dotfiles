@@ -57,7 +57,7 @@ else
 fi
 
 if [ -n "$symbols" ]; then
-  printf "#[fg=%s,bg=%s,bold]  %s %s  #[default]" "$FG" "$bg" "$branch" "$symbols"
+  printf "#[fg=%s,bg=%s,bold]   %s %s  #[default]" "$FG" "$bg" "$branch" "$symbols"
 else
   printf "#[fg=%s,bg=%s,bold]  %s  #[default]" "$FG" "$bg" "$branch"
 fi

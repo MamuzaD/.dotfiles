@@ -14,11 +14,12 @@ font-family = Berkeley Mono Trial
 # themes (ghostty +list-themes)
 # theme = catppuccin
 theme = tokyonight
+# theme = Everforest Dark Hard 
 # theme = nord
 # theme = Rose Pine Moon
 
 # styles
-font-size = 14
+font-size = 15
 background-opacity = 0.8
 background-blur = 20
 cursor-style = block 
