@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# green = any watched dev server up, dim = none up
+
+ICON="󰒍"
+PORTS=(3000 4321 5173 3210 3211 8081 8000)
+
+port_up() { lsof -iTCP:$1 -sTCP:LISTEN >/dev/null 2>&1; }
+
+count=0
+for port in "${PORTS[@]}"; do
+  port_up "$port" && ((count++))
+done
+
+if [ $count -gt 0 ]; then
+  echo "#[fg=#9ece6a,bg=default] $ICON #[fg=default,bg=default]"
+else
+  echo "#[fg=#565f89,bg=default] $ICON #[fg=default,bg=default]"
+fi

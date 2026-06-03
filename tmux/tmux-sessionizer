@@ -170,7 +170,7 @@ delete_fzf_preview='
 
 # just to simplify fzf styling
 fzf_default_opts=(
-  --bind "j:down,k:up"
+  --bind "ctrl-j:down,ctrl-k:up"
   --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
   --border=rounded
   --border-label=tmux-sessionizer
