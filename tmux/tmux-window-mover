@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# move current window to another session and follow it
+
+if [[ -z $TMUX ]]; then
+  echo "Must be run inside a tmux session."
+  exit 1
+fi
+
+current_session=$(tmux display-message -p '#S')
+current_window=$(tmux display-message -p '#W')
+current_window_index=$(tmux display-message -p '#I')
+total_sessions=$(tmux list-sessions 2>/dev/null | wc -l | tr -d ' ')
+
+# preview: list windows in the target session
+fzf_preview='
+  tmux list-windows -t {} -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g"
+'
+
+fzf_opts=(
+  --bind "ctrl-j:down,ctrl-k:up"
+  --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
+  --border=rounded
+  --border-label=" tmux-window-mover "
+  --border-label-pos=0
+  --padding=1
+  --reverse
+  --cycle
+  --prompt="> "
+  --margin=1,1
+  --height=100%
+  --header="Moving: [$current_window_index] $current_window | From: $current_session | Total sessions: $total_sessions"
+  --preview-label=" windows "
+  --preview "$fzf_preview"
+)
+
+selected=$(tmux list-sessions -F '#S' | grep -v "^${current_session}$" | fzf "${fzf_opts[@]}")
+
+if [[ -z "$selected" ]]; then
+  exit 0
+fi
+
+tmux move-window -t "$selected"
+tmux switch-client -t "$selected"
