@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: portkill <port>"
+}
+
+if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+$ ]]; then
+  usage
+  exit 1
+fi
+
+port="$1"
+pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN || true)
+
+if [[ -z "$pids" ]]; then
+  echo "No process listening on port $port"
+  exit 0
+fi
+
+echo "$pids" | xargs kill
+echo "Killed process(es) on port $port: $pids"
