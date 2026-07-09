@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# swap current window with another window in the same session
+
+if [[ -z $TMUX ]]; then
+  echo "Must be run inside a tmux session."
+  exit 1
+fi
+
+current_session=$(tmux display-message -p '#S')
+current_window_id=$(tmux display-message -p '#{window_id}')
+current_window=$(tmux display-message -p '#W')
+current_window_index=$(tmux display-message -p '#I')
+total_windows=$(tmux list-windows -t "$current_session" -F '#{window_id}' 2>/dev/null | wc -l | tr -d ' ')
+
+if [[ "$total_windows" -le 1 ]]; then
+  tmux display-message -d 1000 "window-swapper: no other windows"
+  exit 0
+fi
+
+fzf_preview='
+  tmux list-panes -t {1} -F "#P: #{pane_current_command} | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g"
+'
+
+fzf_opts=(
+  --bind "ctrl-j:down,ctrl-k:up"
+  --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
+  --border=rounded
+  --border-label=" tmux-window-swapper "
+  --border-label-pos=0
+  --padding=1
+  --reverse
+  --cycle
+  --prompt="> "
+  --margin=1,1
+  --height=100%
+  --delimiter=$'\t'
+  --with-nth='{2}  {3}'
+  --nth=1..
+  --header="Swapping: [$current_window_index] $current_window | Session: $current_session | Windows: $total_windows"
+  --preview-label=" panes "
+  --preview "$fzf_preview"
+)
+
+windows=$(
+  tmux list-windows -t "$current_session" -F '#{window_id}	#I	#W' 2>/dev/null |
+    awk -v current_window_id="$current_window_id" '$1 != current_window_id' |
+    sed "s|$HOME|~|g"
+)
+
+fzf_result=$(
+  printf '%s\n' "$windows" |
+    fzf "${fzf_opts[@]}"
+)
+
+if [[ -z "$fzf_result" ]]; then
+  exit 0
+fi
+
+selected=$fzf_result
+
+selected_window_id=$(printf '%s' "$selected" | cut -f1)
+selected_window_index=$(printf '%s' "$selected" | cut -f2)
+selected_window_name=$(printf '%s' "$selected" | cut -f3)
+
+tmux swap-window -d -s "$current_window_id" -t "$selected_window_id"
+tmux select-window -t "$current_window_id"
+tmux display-message -d 1000 "swapped [$current_window_index] $current_window with $selected_window_name"
