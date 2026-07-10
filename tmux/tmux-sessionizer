@@ -12,10 +12,16 @@ CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 # TS_EXTRA_SEARCH_PATHS=(~/ghq:3 ~/Git:3 ~/.config:2)
 # # if set this override the TS_MAX_DEPTH (1)
 # TS_MAX_DEPTH=2
+# # Set to 0 to keep directory choices alphabetically sorted instead of using zoxide frecency
+# TS_ZOXIDE_RANKING=1
+# # Set to 0 to keep tmux sessions alphabetically sorted instead of ranking them by use
+# TS_SESSION_RANKING=1
 TS_SEARCH_PATHS=(~/ ~/personal)
 TS_EXTRA_SEARCH_PATHS=()
 TS_SPECIFIC_PATHS=()
 TS_MAX_DEPTH=1
+TS_ZOXIDE_RANKING=1
+TS_SESSION_RANKING=1
 MARGIN=1,1
 HEIGHT=100%
 # ------------------------
@@ -75,18 +81,56 @@ if [[ -n "${TMUX}" ]]; then
 else
   current_session="none"
 fi
+
+list_tmux_sessions() {
+  if [[ "$TS_SESSION_RANKING" == "0" ]]; then
+    if [[ -n "$TMUX" ]]; then
+      tmux list-sessions \
+        -F '#{session_name}'$'\t''#{?@sessionizer-use-count,#{@sessionizer-use-count},0}' \
+        2>/dev/null |
+        awk -v current="$current_session" -F '\t' '$1 != current { printf "[TMUX] %s (%s)\n", $1, $2 }' |
+        sort
+    else
+      tmux list-sessions \
+        -F '#{session_name}'$'\t''#{?@sessionizer-use-count,#{@sessionizer-use-count},0}' \
+        2>/dev/null |
+        awk -F '\t' '{ printf "[TMUX] %s (%s)\n", $1, $2 }' |
+        sort
+    fi
+    return
+  fi
+
+  local excluded_session=""
+  if [[ -n "$TMUX" ]]; then
+    excluded_session="$current_session"
+  fi
+
+  tmux list-sessions \
+    -F '#{@sessionizer-use-count}'$'\t''#{session_last_attached}'$'\t''#{session_name}' \
+    2>/dev/null |
+    awk -v current="$excluded_session" '
+      BEGIN { FS = OFS = "\t" }
+      current == "" || $3 != current {
+        for (i = 1; i <= 2; i++) {
+          if ($i !~ /^[0-9]+$/) {
+            $i = 0
+          }
+        }
+        print
+      }
+    ' |
+    sort -t $'\t' -k1,1nr -k2,2nr -k3,3 |
+    awk -F '\t' '{ printf "[TMUX] %s (%s)\n", $3, $1 }'
+}
+
 # utility function to find directories
 find_dirs() {
 
   # list TMUX sessions
-  if [[ -n "${TMUX}" ]]; then
-    tmux_sessions_arr=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null | grep -vFx "[TMUX] $current_session")
-  else
-    tmux_sessions_arr=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null)
-  fi
+  tmux_sessions_arr=$(list_tmux_sessions)
 
   if [[ -n "$tmux_sessions_arr" ]]; then
-    echo "$tmux_sessions_arr" | sort
+    echo "$tmux_sessions_arr"
   fi
 
   # new session option
@@ -143,7 +187,47 @@ find_dirs() {
     #     -print
   done
 
-  printf "%s\n" "${all_dirs[@]}" | sort
+  if [[ ${#all_dirs[@]} -eq 0 ]]; then
+    return
+  fi
+
+  if [[ "$TS_ZOXIDE_RANKING" != "0" ]] && command -v zoxide &>/dev/null; then
+    # Keep the configured directory scope, but order known directories by the
+    # same frecency data that powers `zi`. Unseen directories stay available at
+    # the end of the list in alphabetical order.
+    awk '
+      FILENAME == ARGV[1] {
+        if (!candidates[$0]++) {
+          fallback[++fallback_count] = $0
+        }
+        next
+      }
+
+      candidates[$0] && !ranked[$0]++ { print }
+
+      END {
+        for (i = 1; i <= fallback_count; i++) {
+          if (!ranked[fallback[i]]) {
+            print fallback[i]
+          }
+        }
+      }
+    ' \
+      <(printf "%s\n" "${all_dirs[@]}" | sort -u) \
+      <(
+        zoxide query --list 2>/dev/null | while IFS= read -r dir; do
+          if [[ "$dir" == "$HOME" ]]; then
+            printf "~\n"
+          elif [[ "$dir" == "$HOME/"* ]]; then
+            printf "~/%s\n" "${dir#"$HOME/"}"
+          else
+            printf "%s\n" "$dir"
+          fi
+        done
+      )
+  else
+    printf "%s\n" "${all_dirs[@]}" | sort -u
+  fi
 }
 
 # just to simplify preview script
@@ -152,7 +236,7 @@ fzf_preview='
   case {} in
     "[NEW]") echo "Create a new session" ;;
     "[DEL]") echo "Delete a session"; tmux list-sessions -F "- #S" ;;
-    "[TMUX]"*) tmux list-windows -t "$(echo {} | sed "s/^\[TMUX\] //")" \
+    "[TMUX]"*) tmux list-windows -t "$(echo {} | sed -E "s/^\[TMUX\] (.*) \([0-9]+\)$/\1/")" \
       -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
     "~"*) echo {}; path={}; \
       eval /bin/ls "$path" | /usr/bin/sed "s/^/- /";;
@@ -177,6 +261,7 @@ fzf_default_opts=(
   --border-label-pos=0
   --padding=1
   --reverse
+  --no-sort
   --cycle
   --prompt="> "
   --margin="$MARGIN"
@@ -259,13 +344,24 @@ if [[ "$selected" == "[DEL]" ]]; then
   exit 0
 fi
 
-if [[ "$selected" =~ ^\[TMUX\]\ (.+)$ ]]; then
+selected_from_tmux=0
+if [[ "$selected" =~ ^\[TMUX\]\ (.*)\ \([0-9]+\)$ ]]; then
+  selected_from_tmux=1
   selected="${BASH_REMATCH[1]}"
   selected_name="$selected"
 fi
 
 tmux_running=$(pgrep tmux)
 selected=$(echo "$selected" | sed "s|^~|$HOME|") # expand path back if it has '~'
+
+# Starting a project through the sessionizer should improve its future rank,
+# just as changing to it with `zi` would.
+if [[ "$TS_ZOXIDE_RANKING" != "0" ]] &&
+  [[ "$selected_from_tmux" -eq 0 ]] &&
+  [[ -d "$selected" ]] &&
+  command -v zoxide &>/dev/null; then
+  zoxide add -- "$selected" >/dev/null 2>&1
+fi
 
 if [[ "$selected" == "kill" ]]; then
   if [[ -n $tmux_running ]]; then
