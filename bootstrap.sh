@@ -63,11 +63,18 @@ for script in "$DOTFILES_DIR"/tmux/tmux-*; do
   fi
 done
 
-# --- tmux ai attention (standalone polling daemon) ---
-# link the .py scripts under clean command names (no extension)
+# --- tmux ai attention (standalone polling daemon, TypeScript) ---
+# install js-toml (uses your global ~/.npmrc; no registry/cert config lives in-repo)
+if command -v npm >/dev/null 2>&1; then
+  ( cd "$DOTFILES_DIR/tmux/ai-attention" && npm install --no-audit --no-fund --silent ) \
+    || echo "warn: 'npm install' in tmux/ai-attention failed; run it manually"
+else
+  echo "warn: npm not found; skipping tmux/ai-attention deps (js-toml)"
+fi
+# link the .ts entrypoints under clean command names (bun runs them via shebang)
 for script in tmux-ai-detect tmux-ai-watch; do
-  chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.py"
-  link "$DOTFILES_DIR/tmux/ai-attention/$script.py" "$LOCAL_BIN/$script"
+  chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.ts"
+  link "$DOTFILES_DIR/tmux/ai-attention/$script.ts" "$LOCAL_BIN/$script"
 done
 
 # --- general scripts ---
