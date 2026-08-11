@@ -63,6 +63,13 @@ for script in "$DOTFILES_DIR"/tmux/tmux-*; do
   fi
 done
 
+# --- tmux ai attention (standalone polling daemon) ---
+# link the .py scripts under clean command names (no extension)
+for script in tmux-ai-detect tmux-ai-watch; do
+  chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.py"
+  link "$DOTFILES_DIR/tmux/ai-attention/$script.py" "$LOCAL_BIN/$script"
+done
+
 # --- general scripts ---
 for script in "$DOTFILES_DIR"/scripts/*; do
   if [[ -x "$script" || "$script" == *.sh ]]; then
