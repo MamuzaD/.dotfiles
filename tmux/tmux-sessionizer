@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tmux"
 CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 
@@ -62,6 +64,25 @@ hydrate() {
   elif [ -f "$HOME/.tmux-sessionizer" ]; then
     tmux send-keys -t "$1" "source $HOME/.tmux-sessionizer" c-M
   fi
+}
+
+# bump the manual use-count ranking for a [TMUX] fzf line by delta (+1/-1)
+# no-op for anything that isn't a [TMUX] entry (e.g. [NEW]/[DEL]/directories)
+bump_session_use_count() {
+  local line="$1" delta="$2"
+  [[ "$line" =~ ^\[TMUX\]\ (.*)\ \([0-9]+\)$ ]] || return 0
+
+  local sess="${BASH_REMATCH[1]}"
+  tmux has-session -t "$sess" 2>/dev/null || return 0
+
+  local current
+  current=$(tmux show-options -t "$sess" -qv "@sessionizer-use-count" 2>/dev/null)
+  [[ "$current" =~ ^[0-9]+$ ]] || current=0
+
+  local new_count=$((current + delta))
+  ((new_count < 0)) && new_count=0
+
+  tmux set-option -t "$sess" "@sessionizer-use-count" "$new_count"
 }
 
 sanity_check
@@ -269,6 +290,18 @@ fzf_default_opts=(
   --header="Current Session: $current_session | Total: $tmux_sessions_count"
 )
 
+# internal hooks used by the ctrl-w/ctrl-s fzf key bindings below; not part of
+# the public CLI
+if [[ "$1" == "--bump" ]]; then
+  bump_session_use_count "$2" "$3"
+  exit 0
+fi
+
+if [[ "$1" == "--list" ]]; then
+  find_dirs
+  exit 0
+fi
+
 if [[ $# -eq 1 ]]; then
   arg="$1"
   # Expand ~ and env vars (for testing path-ness)
@@ -287,6 +320,9 @@ else
   selected=$(
     find_dirs | fzf \
       "${fzf_default_opts[@]}" \
+      --header="Current Session: $current_session | Total: $tmux_sessions_count | ctrl-w/ctrl-s: rank up/down" \
+      --bind "ctrl-w:execute-silent($SELF --bump {} +1)+reload($SELF --list)" \
+      --bind "ctrl-s:execute-silent($SELF --bump {} -1)+reload($SELF --list)" \
       --preview "$fzf_preview"
   )
 
