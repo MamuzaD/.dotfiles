@@ -68,6 +68,9 @@ for script in tmux-ai-detect tmux-ai-watch; do
   # chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.py"
   # link "$DOTFILES_DIR/tmux/ai-attention/$script.py" "$LOCAL_BIN/$script"
 done
+# manifest sync helper (bash, no extension)
+# chmod +x "$DOTFILES_DIR/tmux/ai-attention/refresh-manifests"
+# link "$DOTFILES_DIR/tmux/ai-attention/refresh-manifests" "$LOCAL_BIN/refresh-manifests"
 
 # --- general scripts ---
 for script in "$DOTFILES_DIR"/scripts/*; do
