@@ -64,7 +64,7 @@ for script in "$DOTFILES_DIR"/tmux/tmux-*; do
 done
 
 # --- tmux ai attention (standalone polling daemon) ---
-for script in tmux-ai-detect tmux-ai-watch; do
+for script in tmux-ai-detect tmux-ai-watch tmux-ai-agents; do
   # chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.py"
   # link "$DOTFILES_DIR/tmux/ai-attention/$script.py" "$LOCAL_BIN/$script"
 done
