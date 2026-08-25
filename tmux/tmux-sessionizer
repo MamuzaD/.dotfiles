@@ -273,9 +273,37 @@ delete_fzf_preview='
   esac
 '
 
+# ANSI colors for the fzf list (requires --ansi). fzf strips these escapes
+# from the returned selection / {} placeholders, so downstream matching stays
+# on clean text.
+c_reset=$'\033[0m'
+c_tmux=$'\033[38;2;158;206;106m'  # green   -> [TMUX] sessions
+c_new=$'\033[38;2;122;162;247m'   # blue    -> [NEW]
+c_del=$'\033[38;2;247;118;142m'   # red     -> [DEL] / [ALL]
+c_dir=$'\033[38;2;192;202;245m'   # fg      -> directories
+c_dim=$'\033[38;2;86;95;137m'     # comment -> use-count suffix
+
+# colorize the main session/dir list; branch (t) on the first match so each
+# line gets exactly one rule
+colorize_list() {
+  sed -E \
+    -e "s/^(\[TMUX\]) (.+) (\([0-9]+\))$/${c_tmux}\1${c_reset} \2 ${c_dim}\3${c_reset}/;t" \
+    -e "s/^\[NEW\]$/${c_new}[NEW]${c_reset}/;t" \
+    -e "s/^\[DEL\]$/${c_del}[DEL]${c_reset}/;t" \
+    -e "s/^(.+)$/${c_dir}\1${c_reset}/"
+}
+
+# colorize the delete menu: [ALL] red, session names green
+colorize_del() {
+  sed -E \
+    -e "s/^\[ALL\]$/${c_del}[ALL]${c_reset}/;t" \
+    -e "s/^(.+)$/${c_tmux}\1${c_reset}/"
+}
+
 # just to simplify fzf styling
 fzf_default_opts=(
-  --bind "ctrl-j:down,ctrl-k:up"
+  --ansi
+  --bind "j:down,k:up"
   --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
   --border=rounded
   --border-label=tmux-sessionizer
@@ -298,7 +326,7 @@ if [[ "$1" == "--bump" ]]; then
 fi
 
 if [[ "$1" == "--list" ]]; then
-  find_dirs
+  find_dirs | colorize_list
   exit 0
 fi
 
@@ -318,7 +346,7 @@ if [[ $# -eq 1 ]]; then
   fi
 else
   selected=$(
-    find_dirs | fzf \
+    find_dirs | colorize_list | fzf \
       "${fzf_default_opts[@]}" \
       --header="Current Session: $current_session | Total: $tmux_sessions_count | ctrl-w/ctrl-s: rank up/down" \
       --bind "ctrl-w:execute-silent($SELF --bump {} +1)+reload($SELF --list)" \
@@ -353,7 +381,7 @@ if [[ "$selected" == "[DEL]" ]]; then
         echo "[ALL]"
         # list sessions, excluding current so you can't delete it by mistake
         tmux list-sessions -F '#S' | grep -v "^$current_session$"
-      ) | fzf \
+      ) | colorize_del | fzf \
         "${fzf_default_opts[@]}" \
         --prompt "del > " \
         --preview "$delete_fzf_preview"
