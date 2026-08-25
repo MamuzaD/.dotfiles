@@ -24,7 +24,7 @@ TS_SPECIFIC_PATHS=()
 TS_MAX_DEPTH=1
 TS_ZOXIDE_RANKING=1
 TS_SESSION_RANKING=1
-MARGIN=1,1
+MARGIN=0,0
 HEIGHT=100%
 # ------------------------
 
@@ -96,7 +96,7 @@ if [[ ${#TS_EXTRA_SEARCH_PATHS[@]} -gt 0 ]]; then
 fi
 
 # vars
-tmux_sessions_count=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null | wc -l)
+tmux_sessions_count=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null | awk 'END {print NR}')
 if [[ -n "${TMUX}" ]]; then
   current_session=$(tmux display-message -p '#S')
 else
@@ -257,10 +257,26 @@ fzf_preview='
   case {} in
     "[NEW]") echo "Create a new session" ;;
     "[DEL]") echo "Delete a session"; tmux list-sessions -F "- #S" ;;
-    "[TMUX]"*) tmux list-windows -t "$(echo {} | sed -E "s/^\[TMUX\] (.*) \([0-9]+\)$/\1/")" \
-      -F "#I - #W#F | #{pane_current_path}" 2>/dev/null | sed "s|$HOME|~|g" ;;
-    "~"*) echo {}; path={}; \
-      eval /bin/ls "$path" | /usr/bin/sed "s/^/- /";;
+    "[TMUX]"*) sess=$(echo {} | sed -E "s/^\[TMUX\] (.*) \([0-9]+\)$/\1/"); \
+      g=$(printf "\033[32m"); d=$(printf "\033[90m"); b=$(printf "\033[34m"); r=$(printf "\033[0m"); \
+      windows=$(tmux list-windows -t "$sess" \
+        -F "#{?window_active,▶,·} #I:#W#F (#{pane_current_command}) #{pane_current_path}" 2>/dev/null \
+        | sed "s|$HOME|~|g" \
+        | sed -E "s/^▶(.*)/$g▶$r\1/; s/^·(.*)/$d·$r\1/; s/\(([^)]*)\)/($b\1$r)/"); \
+      window_lines=$(printf "%s\n" "$windows" | wc -l | tr -d " "); \
+      capture_lines=$((FZF_PREVIEW_LINES - window_lines - 2)); \
+      if ((capture_lines < 1)); then capture_lines=1; fi; \
+      printf "%s\n\n\n" "$windows"; \
+      tmux capture-pane -ept "$sess" 2>/dev/null \
+        | sed -E "/zsh:[0-9]+:.*math/d; /bad math/d; /math expression/d; /operand expected/d; /gitstatus failed to initialize/d" \
+        | sed -e "s/[[:space:]]*$//" -e "/^$/N;/^\n$/D" \
+        | tail -n "$capture_lines" ;;
+    "~"*) dir=$(echo {} | sed "s|^~|$HOME|"); \
+      if command -v eza >/dev/null 2>&1; then \
+        eza -1a --icons --git --group-directories-first --color=always "$dir"; \
+      else \
+        /bin/ls "$dir" | /usr/bin/sed "s/^/- /"; \
+      fi ;;
     *) echo "No preview available" ;;
   esac
 '
@@ -277,11 +293,11 @@ delete_fzf_preview='
 # from the returned selection / {} placeholders, so downstream matching stays
 # on clean text.
 c_reset=$'\033[0m'
-c_tmux=$'\033[38;2;158;206;106m'  # green   -> [TMUX] sessions
-c_new=$'\033[38;2;122;162;247m'   # blue    -> [NEW]
-c_del=$'\033[38;2;247;118;142m'   # red     -> [DEL] / [ALL]
-c_dir=$'\033[38;2;192;202;245m'   # fg      -> directories
-c_dim=$'\033[38;2;86;95;137m'     # comment -> use-count suffix
+c_tmux=$'\033[38;2;158;206;106m' # green   -> [TMUX] sessions
+c_new=$'\033[38;2;122;162;247m'  # blue    -> [NEW]
+c_del=$'\033[38;2;247;118;142m'  # red     -> [DEL] / [ALL]
+c_dir=$'\033[38;2;192;202;245m'  # fg      -> directories
+c_dim=$'\033[38;2;86;95;137m'    # comment -> use-count suffix
 
 # colorize the main session/dir list; branch (t) on the first match so each
 # line gets exactly one rule
@@ -348,10 +364,12 @@ else
   selected=$(
     find_dirs | colorize_list | fzf \
       "${fzf_default_opts[@]}" \
-      --header="Current Session: $current_session | Total: $tmux_sessions_count | ctrl-w/ctrl-s: rank up/down" \
+      --header="$(printf 'Current Session: %s\nTotal: %s | ctrl-w/ctrl-s: rank up/down' \
+        "$current_session" "$tmux_sessions_count")" \
       --bind "ctrl-w:execute-silent($SELF --bump {} +1)+reload($SELF --list)" \
       --bind "ctrl-s:execute-silent($SELF --bump {} -1)+reload($SELF --list)" \
-      --preview "$fzf_preview"
+      --preview "$fzf_preview" \
+      --preview-window='right,60%'
   )
 
   selected_name=$(basename "$selected" | tr . _)
