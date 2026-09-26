@@ -2,7 +2,7 @@
 set -euo pipefail
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-DOTFILES_DIR="$XDG_CONFIG_HOME/dotfiles"
+DOTFILES_DIR="$HOME/dotfiles"
 LOCAL_BIN="$HOME/.local/bin"
 
 # dry-run
@@ -62,15 +62,6 @@ for script in "$DOTFILES_DIR"/tmux/tmux-*; do
     :
   fi
 done
-
-# --- tmux ai attention (standalone polling daemon) ---
-for script in tmux-ai-detect tmux-ai-watch tmux-ai-agents; do
-  # chmod +x "$DOTFILES_DIR/tmux/ai-attention/$script.py"
-  # link "$DOTFILES_DIR/tmux/ai-attention/$script.py" "$LOCAL_BIN/$script"
-done
-# manifest sync helper (bash, no extension)
-# chmod +x "$DOTFILES_DIR/tmux/ai-attention/refresh-manifests"
-# link "$DOTFILES_DIR/tmux/ai-attention/refresh-manifests" "$LOCAL_BIN/refresh-manifests"
 
 # --- general scripts ---
 for script in "$DOTFILES_DIR"/scripts/*; do
