@@ -27,9 +27,10 @@ gui:
   showPanelJumps: false
   mouseEvents: true
 git:
-  pagers:
+  overrideGpg: true
+  diffRenderers:
     - colorArg: always
-      pager: delta --paging=never --line-numbers
+      command: delta --paging=never --line-numbers
   # merging:
   #   manualCommit: false
   #   args: "--no-ff"
