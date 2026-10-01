@@ -53,6 +53,9 @@ link() {
 # lazygit
 # link "$DOTFILES_DIR/lazygit/config.yml" "$XDG_CONFIG_HOME/lazygit/config.yml"
 
+# --- git ---
+# link "$DOTFILES_DIR/git/config" "$XDG_CONFIG_HOME/git/config"
+
 # --- tmux scripts ---
 for script in "$DOTFILES_DIR"/tmux/tmux-*; do
   [[ "$script" == *.conf ]] && continue

@@ -1,0 +1,49 @@
+[filter "lfs"]
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+
+[init]
+	defaultBranch = main
+
+[user]
+	name = daniel mamuza
+	email = 94477022+MamuzaD@users.noreply.github.com
+	signingkey = 5743CC78B17069EFF7AFEAFD035FD88D12855E14
+
+[gpg]
+	program = gpg
+
+[commit]
+	gpgsign = true
+
+[tag]
+	gpgSign = true
+
+[core]
+	pager = delta
+	editor = nvim
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	line-numbers = true
+	syntax-theme = ansi
+
+[merge]
+	conflictStyle = zdiff3              # improved conflict context
+	; ff = false                          # preserve merge commits when you explicitly merge
+
+# machine-local (keep below [user], above [credential])
+[include]
+	path = ~/dotfiles/git/config.local
+
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !gh auth git-credential
