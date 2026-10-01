@@ -39,6 +39,7 @@ link() {
 
 # --- zsh ---
 # link "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
+# link "$DOTFILES_DIR/zsh/.zshenv" "$HOME/.zshenv"
 
 # --- nvim ---
 # link "$DOTFILES_DIR/nvim" "$XDG_CONFIG_HOME/nvim"

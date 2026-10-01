@@ -1,3 +1,10 @@
+# Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
+# Initialization code that may require console input (password prompts, [y/n]
+# confirmations, etc.) must go above this block; everything else may go below.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
 
@@ -105,38 +112,20 @@ source $ZSH/oh-my-zsh.sh
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # daniel's aliases
-alias ls='eza -1a --icons --git --group-directories-first'
-alias lsg='eza -ga --icons --git --group-directories-first'
-alias vim='nvim'
-alias v='nvim'
-alias lg="lazygit"
-alias ts="tmux-sessionizer"
+source "$HOME/dotfiles/zsh/aliases.zsh"
+
+# --- os-specific ---
+case "$OSTYPE" in
+  darwin*) source "$HOME/dotfiles/zsh/mac.zsh" ;;
+  linux*)  source "$HOME/dotfiles/zsh/linux.zsh" ;;
+esac
 
 # ----- exports -----
 
-# xdg
-export XDG_CONFIG_HOME="$HOME/.config"
-
-# for local scripts
-export PATH="$HOME/.local/bin:$PATH"
+# xdg, ~/.local/bin, cargo, bob: see .zshenv
 
 # fnm
 eval "$(fnm env --use-on-cd --shell zsh)"
-
-# latex
-export PATH="/usr/local/texlive/2025basic/bin/universal-darwin:$PATH"
-export PATH="/opt/homebrew/opt/postgresql@18/bin:$PATH"
-
-# java
-export JAVA_HOME="$(brew --prefix openjdk@21)/libexec/openjdk.jdk/Contents/Home"
-export PATH="$JAVA_HOME/bin:$PATH"
-
-# android
-export ANDROID_HOME=/Users/daniel/Library/Android/sdk
-export PATH=$PATH:$ANDROID_HOME/emulator
-export PATH=$PATH:$ANDROID_HOME/tools
-export PATH=$PATH:$ANDROID_HOME/tools/bin
-export PATH=$PATH:$ANDROID_HOME/platform-tools
 
 # zoxide (must be after compinit; with oh-my-zsh that's already handled)
 if command -v zoxide >/dev/null 2>&1; then
@@ -146,3 +135,9 @@ fpath+=~/.zfunc; autoload -Uz compinit; compinit
 
 # direnv (per-directory env)
 eval "$(direnv hook zsh)"
+
+# bun completions
+[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
+
+# machine-local, untracked (see .gitignore)
+[[ -f "$HOME/dotfiles/zsh/.zshrc.local" ]] && source "$HOME/dotfiles/zsh/.zshrc.local"
