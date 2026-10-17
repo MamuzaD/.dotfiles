@@ -1,0 +1,59 @@
+#!/bin/zsh -f
+
+# Copy files or folders to the macOS clipboard.
+if [[ ${1-} == --help || ${1-} == -h ]]; then
+  print -r -- 'Usage: pbcopyfile [--] <file-or-folder> [...]'
+  print -r -- 'Example: pbcopyfile ~/personal/resume/"Daniel Mamuza resume.pdf"'
+  exit 0
+fi
+[[ ${1-} == -- ]] && shift
+if (( $# == 0 )); then
+  print -u2 -r -- 'Usage: pbcopyfile [--] <file-or-folder> [...]'
+  exit 1
+fi
+
+typeset file_path
+typeset -a files
+for file_path in "$@"; do
+  # Also accept a quoted ~/ prefix, which the shell does not expand.
+  case "$file_path" in
+    '~') file_path="$HOME" ;;
+    '~/'*) file_path="$HOME/${file_path#\~/}" ;;
+  esac
+  if [[ -z "$file_path" || ! -e "$file_path" ]]; then
+    print -u2 -r -- "pbcopyfile: no such file or folder: $file_path"
+    exit 1
+  fi
+  files+=("${file_path:a}")
+done
+
+# Pass paths as arguments and write native file URLs to the clipboard.
+command osascript -l JavaScript - "${files[@]}" <<'JAVASCRIPT' >/dev/null || exit
+ObjC.import("AppKit");
+ObjC.import("Foundation");
+
+function run(filePaths) {
+  var urls = $.NSMutableArray.alloc.init;
+  filePaths.forEach(function (filePath) {
+    urls.addObject($.NSURL.fileURLWithPath($(filePath)));
+  });
+  var clipboard = $.NSPasteboard.generalPasteboard;
+  clipboard.clearContents;
+  if (!clipboard.writeObjects(urls)) {
+    throw new Error("Could not copy files to the clipboard.");
+  }
+
+  // Materialize each file URL before this short-lived process exits.
+  var items = clipboard.pasteboardItems;
+  if (Number(items.count) !== filePaths.length) {
+    throw new Error("Clipboard did not receive all files.");
+  }
+  for (var i = 0; i < filePaths.length; i++) {
+    if (!ObjC.unwrap(items.objectAtIndex(i).stringForType("public.file-url"))) {
+      throw new Error("Clipboard did not receive a file URL.");
+    }
+  }
+}
+JAVASCRIPT
+
+print -r -- "Copied ${#files} item(s) to the clipboard."
