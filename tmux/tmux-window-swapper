@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# swap current window with another window in the same session
+# swap or reorder the current window within the same session
 
 if [[ -z $TMUX ]]; then
   echo "Must be run inside a tmux session."
@@ -36,7 +36,7 @@ fzf_opts=(
   --delimiter=$'\t'
   --with-nth='{2}  {3}'
   --nth=1..
-  --header="Swapping: [$current_window_index] $current_window | Session: $current_session | Windows: $total_windows"
+  --header="From: [$current_window_index] $current_window | Session: $current_session | Windows: $total_windows"
   --preview-label=" panes "
   --preview "$fzf_preview"
 )
@@ -62,6 +62,41 @@ selected_window_id=$(printf '%s' "$selected" | cut -f1)
 selected_window_index=$(printf '%s' "$selected" | cut -f2)
 selected_window_name=$(printf '%s' "$selected" | cut -f3)
 
-tmux swap-window -d -s "$current_window_id" -t "$selected_window_id"
+action=$(
+  printf '%s\n' \
+    $'swap\tSwap the two windows' \
+    $'move\tMove to this position and shift the windows in between' |
+    fzf "${fzf_opts[@]}" \
+      --with-nth=2.. \
+      --no-preview \
+      --header="[$current_window_index] $current_window → [$selected_window_index] $selected_window_name"
+)
+
+case "${action%%$'\t'*}" in
+  swap)
+    tmux swap-window -d -s "$current_window_id" -t "$selected_window_id" || exit 1
+    message="swapped [$current_window_index] $current_window with $selected_window_name"
+    ;;
+  move)
+    # Swap through the intervening windows in order to preserve their order.
+    sort_order=-n
+    if (( current_window_index > selected_window_index )); then
+      sort_order=-rn
+    fi
+    intervening_windows=$(
+      tmux list-windows -t "$current_session" -F '#I #{window_id}' |
+        awk -v source="$current_window_index" -v target="$selected_window_index" \
+          '($1 > source && $1 <= target) || ($1 < source && $1 >= target)' |
+        sort "$sort_order"
+    )
+    while read -r _ window_id; do
+      [[ -n "$window_id" ]] || continue
+      tmux swap-window -d -s "$current_window_id" -t "$window_id" || exit 1
+    done <<< "$intervening_windows"
+    message="moved [$current_window_index] $current_window to [$selected_window_index]"
+    ;;
+  *) exit 0 ;;
+esac
+
 tmux select-window -t "$current_window_id"
-tmux display-message -d 1000 "swapped [$current_window_index] $current_window with $selected_window_name"
+tmux display-message -d 1000 "$message"

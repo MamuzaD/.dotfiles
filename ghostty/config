@@ -22,6 +22,7 @@ theme = tokyonight
 # styles
 font-size = 15
 background-opacity = 0.8
+keybind = cmd+shift+o=toggle_background_opacity
 background-blur = 20
 cursor-style = block 
 
