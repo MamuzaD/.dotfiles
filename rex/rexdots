@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# rexdots: rex port of the tmux .dotfiles menu (prefix + d)
+
+choice=$(
+  printf '%s\n' \
+    $'\033[38;2;126;191;80m  nvim\033[0m\t~/dotfiles/nvim' \
+    $'\033[38;2;187;154;247m  rex\033[0m\t~/dotfiles/rex/init.lua' \
+    $'\033[38;2;27;185;31m  tmux\033[0m\t~/dotfiles/tmux/tmux.conf' \
+    $'\033[38;2;106;90;204m  zshrc\033[0m\t~/dotfiles/zsh/.zshrc' \
+    $'\033[38;2;53;81;243m󰊠  ghostty\033[0m\t~/dotfiles/ghostty/config' \
+    $'\033[38;2;187;154;247m  Toggle AI sound\033[0m\tsound' |
+    fzf --ansi --reverse --cycle --no-info \
+      --bind "j:down,k:up" \
+      --color "prompt:#7AA2f7,pointer:#7AA2f7,header:#7AA2f7" \
+      --border=rounded --border-label=" rexdots " --border-label-pos=0 \
+      --delimiter=$'\t' --with-nth=1 \
+      --prompt="> "
+)
+
+target=$(cut -f2 <<< "$choice")
+
+case "$target" in
+  "") ;;
+  sound) ~/.local/bin/senu sound toggle ;;
+  *) nvim "${target/#\~/$HOME}" ;;
+esac
+
+[[ -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null

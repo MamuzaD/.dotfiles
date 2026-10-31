@@ -4,6 +4,7 @@ alias lsg='eza -ga --icons --git --group-directories-first'
 alias vim='nvim'
 alias v='nvim'
 alias ts="tmux-sessionizer"
+alias rx="rexionizer"
 
 # lazygit (cd to last repo on quit)
 lg() {

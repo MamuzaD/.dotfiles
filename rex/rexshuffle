@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# rexshuffle: rex port of tmux-window-swapper
+# swap or reorder the current tab within the same session
+
+if [[ -z $REX_SESSION ]]; then
+  echo "Must be run inside a rex session."
+  exit 1
+fi
+
+close_popup() {
+  [[ -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null
+}
+trap close_popup EXIT
+
+view=$(rex api call -s "$REX_SESSION" session.view)
+current_window_id=$(jq -r .active_window_id <<< "$view")
+total_windows=$(jq '.windows | length' <<< "$view")
+
+if [[ "$total_windows" -le 1 ]]; then
+  echo "window-swapper: no other tabs"
+  sleep 1
+  exit 0
+fi
+
+# window_id<TAB>index<TAB>title
+windows=$(
+  jq -r '.windows | to_entries[] | "\(.value.window_id)\t\(.key + 1)\t\(.value.focused_block_id)"' <<< "$view" |
+    while IFS=$'\t' read -r wid idx bid; do
+      title=$(rex block call -b "$bid" title 2>/dev/null | jq -r .title)
+      printf '%s\t%s\t%s\n' "$wid" "$idx" "${title/#$HOME/\~}"
+    done
+)
+
+current=$(awk -F '\t' -v w="$current_window_id" '$1 == w' <<< "$windows")
+current_window_index=$(cut -f2 <<< "$current")
+current_window=$(cut -f3 <<< "$current")
+
+fzf_opts=(
+  --bind "ctrl-j:down,ctrl-k:up"
+  --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
+  --border=rounded
+  --border-label=" rexshuffle "
+  --border-label-pos=0
+  --padding=1
+  --reverse
+  --cycle
+  --prompt="> "
+  --margin=1,1
+  --height=100%
+  --delimiter=$'\t'
+  --with-nth='{2}  {3}'
+  --nth=1..
+  --header="From: [$current_window_index] $current_window | Tabs: $total_windows"
+)
+
+selected=$(awk -F '\t' -v w="$current_window_id" '$1 != w' <<< "$windows" | fzf "${fzf_opts[@]}")
+[[ -z "$selected" ]] && exit 0
+
+selected_window_id=$(cut -f1 <<< "$selected")
+selected_window_index=$(cut -f2 <<< "$selected")
+selected_window_name=$(cut -f3 <<< "$selected")
+
+action=$(
+  printf '%s\n' \
+    $'swap\tSwap the two tabs' \
+    $'move\tMove to this position and shift the tabs in between' |
+    fzf "${fzf_opts[@]}" \
+      --with-nth=2.. \
+      --header="[$current_window_index] $current_window → [$selected_window_index] $selected_window_name"
+)
+
+# place window $1 just before window $2 (or at the end when $2 is empty)
+move_before() {
+  local args
+  # adjacent tabs: the first move already swapped them
+  [[ "$1" == "$2" ]] && return
+  if [[ -n "$2" ]]; then
+    args=$(jq -nc --arg w "$1" --arg b "$2" '{window_id: $w, before_window_id: $b}')
+  else
+    args=$(jq -nc --arg w "$1" '{window_id: $w}')
+  fi
+  rex api call -s "$REX_SESSION" session.move_window "$args" >/dev/null
+}
+
+# the window id after position $1 (1-based) in the original order
+id_after() {
+  awk -F '\t' -v i="$1" '$2 == i + 1 { print $1 }' <<< "$windows"
+}
+
+case "${action%%$'\t'*}" in
+  swap)
+    if (( current_window_index < selected_window_index )); then
+      move_before "$current_window_id" "$(id_after "$selected_window_index")"
+      move_before "$selected_window_id" "$(id_after "$current_window_index")"
+    else
+      move_before "$selected_window_id" "$(id_after "$current_window_index")"
+      move_before "$current_window_id" "$(id_after "$selected_window_index")"
+    fi
+    ;;
+  move)
+    if (( current_window_index < selected_window_index )); then
+      move_before "$current_window_id" "$(id_after "$selected_window_index")"
+    else
+      move_before "$current_window_id" "$selected_window_id"
+    fi
+    ;;
+esac

@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# rexionizer: rex port of tmux-sessionizer
+# reuses ~/.config/tmux/tmux-sessionizer.conf for search paths
+# switching needs Remote Control on (Rex Settings > Rex Server)
+
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux-sessionizer.conf"
+
+TS_SEARCH_PATHS=(~/ ~/personal)
+TS_EXTRA_SEARCH_PATHS=()
+TS_SPECIFIC_PATHS=()
+TS_MAX_DEPTH=1
+TS_ZOXIDE_RANKING=1
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+fi
+
+if [[ ${#TS_EXTRA_SEARCH_PATHS[@]} -gt 0 ]]; then
+  TS_SEARCH_PATHS+=("${TS_EXTRA_SEARCH_PATHS[@]}")
+fi
+
+for cmd in rex fzf jq; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "$cmd is not installed. Please install it first."
+    read -rn1
+    exit 1
+  fi
+done
+
+current_session="${REX_SESSION:-none}"
+
+# close the popup this runs in (floating layers don't always close on exit).
+# REX_POPUP is set by the init.lua popup; REX_BLOCK alone is set in every pane
+close_popup() {
+  [[ -n "$REX_POPUP" && -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null
+}
+
+switch_to() {
+  rex do -e 'rex.client.queue("session.select", { session_id = rex.args.sid })' sid="$1" ||
+    { echo "turn on Remote Control in Rex Settings > Rex Server"; read -rn1; }
+}
+
+# label<TAB>session_id, skipping the session we're in
+rex_sessions() {
+  rex ls --json | jq -r --arg cur "$current_session" \
+    '.sessions[] | select(.session_id != $cur) | "\(.label)\t\(.session_id)"'
+}
+
+session_id_for() {
+  rex ls --json | jq -r --arg l "$1" '.sessions[] | select(.label == $l) | .session_id' | head -n1
+}
+
+hydrate() {
+  if [ -f "$2/.tmux-sessionizer" ]; then
+    rex send -s "$1" "source $2/.tmux-sessionizer"$'\n'
+  elif [ -f "$HOME/.tmux-sessionizer" ]; then
+    rex send -s "$1" "source $HOME/.tmux-sessionizer"$'\n'
+  fi
+}
+
+find_dirs() {
+  rex_sessions | cut -f1 | sed 's/^/[REX] /'
+  echo "[NEW]"
+  [[ -n "$(rex_sessions)" ]] && echo "[DEL]"
+
+  all_dirs=()
+  for specific_path in "${TS_SPECIFIC_PATHS[@]}"; do
+    full_path=$(eval echo "$specific_path")
+    [[ -d "$full_path" ]] && all_dirs+=("${full_path/#"$HOME"/\~}")
+  done
+
+  for entry in "${TS_SEARCH_PATHS[@]}"; do
+    depth=""
+    if [[ "$entry" =~ ^([^:]+):([0-9]+)$ ]]; then
+      path="${BASH_REMATCH[1]}"
+      depth="${BASH_REMATCH[2]}"
+    else
+      path="$entry"
+    fi
+    if [[ -d "$path" ]]; then
+      while IFS= read -r dir; do
+        all_dirs+=("${dir/#"$HOME"/\~}")
+      done < <(
+        find "$path" -mindepth 1 -maxdepth "${depth:-${TS_MAX_DEPTH:-1}}" \
+          -path '*/.git' -prune -o -type d -not -path '*/\.*' -print
+      )
+    fi
+  done
+
+  [[ ${#all_dirs[@]} -eq 0 ]] && return
+
+  if [[ "$TS_ZOXIDE_RANKING" != "0" ]] && command -v zoxide &>/dev/null; then
+    # zoxide frecency first, unseen dirs after in alphabetical order
+    awk '
+      FILENAME == ARGV[1] { if (!candidates[$0]++) fallback[++n] = $0; next }
+      candidates[$0] && !ranked[$0]++ { print }
+      END { for (i = 1; i <= n; i++) if (!ranked[fallback[i]]) print fallback[i] }
+    ' \
+      <(printf "%s\n" "${all_dirs[@]}" | sort -u) \
+      <(zoxide query --list 2>/dev/null | sed "s|^$HOME\$|~|; s|^$HOME/|~/|")
+  else
+    printf "%s\n" "${all_dirs[@]}" | sort -u
+  fi
+}
+
+fzf_preview='
+  case {} in
+    "[NEW]") echo "Create a new session" ;;
+    "[DEL]") echo "Delete a session"; rex ls ;;
+    "[REX]"*) rex capture -s "$(echo {} | sed "s/^\[REX\] //")" 2>/dev/null | tail -n "$FZF_PREVIEW_LINES" ;;
+    "~"*) eza -1a --icons --git --group-directories-first --color=always "$(echo {} | sed "s|^~|$HOME|")" ;;
+    *) echo "No preview available" ;;
+  esac
+'
+
+c_reset=$'\033[0m'
+c_rex=$'\033[38;2;158;206;106m' # green -> [REX] sessions
+c_new=$'\033[38;2;122;162;247m' # blue  -> [NEW]
+c_del=$'\033[38;2;247;118;142m' # red   -> [DEL] / [ALL]
+c_dir=$'\033[38;2;192;202;245m' # fg    -> directories
+
+colorize_list() {
+  sed -E \
+    -e "s/^(\[REX\]) (.+)$/${c_rex}\1${c_reset} \2/;t" \
+    -e "s/^\[NEW\]$/${c_new}[NEW]${c_reset}/;t" \
+    -e "s/^\[DEL\]$/${c_del}[DEL]${c_reset}/;t" \
+    -e "s/^(.+)$/${c_dir}\1${c_reset}/"
+}
+
+current_label=$(rex ls --json | jq -r --arg cur "$current_session" '.sessions[] | select(.session_id == $cur) | .label')
+total=$(rex ls --json | jq '.sessions | length')
+
+fzf_default_opts=(
+  --ansi
+  --bind "j:down,k:up"
+  --color "info:#7AA2f7,prompt:#7AA2f7,spinner:#7AA2f7,header:#7AA2f7,pointer:#7AA2f7,preview-bg:#1b2538"
+  --border=rounded
+  --border-label=rexionizer
+  --border-label-pos=0
+  --padding=1
+  --reverse
+  --no-sort
+  --cycle
+  --prompt="> "
+  --header="Current Session: ${current_label:-none} | Total: $total"
+)
+
+if [[ $# -eq 1 ]]; then
+  selected="$(eval echo "$1")"
+else
+  selected=$(
+    find_dirs | colorize_list | fzf "${fzf_default_opts[@]}" \
+      --preview "$fzf_preview" --preview-window='right,60%'
+  )
+fi
+
+if [[ -z $selected ]]; then
+  close_popup
+  exit 0
+fi
+
+if [[ "$selected" == "[NEW]" ]]; then
+  read -rp "name > " session_name
+  if [[ -n "$session_name" ]]; then
+    sid=$(rex new "$session_name" --json | jq -r .session_id)
+    sleep 0.3 # give the app a moment to see the new session before switching
+    switch_to "$sid"
+  fi
+  close_popup
+  exit 0
+fi
+
+if [[ "$selected" == "[DEL]" ]]; then
+  while true; do
+    to_del=$(
+      (echo "[ALL]"; rex_sessions | cut -f1) |
+        sed -E -e "s/^\[ALL\]$/${c_del}[ALL]${c_reset}/;t" -e "s/^(.+)$/${c_rex}\1${c_reset}/" |
+        fzf "${fzf_default_opts[@]}" --prompt "del > " \
+          --preview 'rex capture -s {} 2>/dev/null | tail -n "$FZF_PREVIEW_LINES"'
+    )
+    [[ -z "$to_del" ]] && break
+    if [[ "$to_del" == "[ALL]" ]]; then
+      rex_sessions | cut -f2 | xargs rex kill &>/dev/null
+      break
+    fi
+    rex kill "$(session_id_for "$to_del")" &>/dev/null
+  done
+  close_popup
+  exit 0
+fi
+
+if [[ "$selected" =~ ^\[REX\]\ (.*)$ ]]; then
+  switch_to "$(session_id_for "${BASH_REMATCH[1]}")"
+  close_popup
+  exit 0
+fi
+
+selected="${selected/#\~/$HOME}"
+selected_name=$(basename "$selected" | tr . _)
+
+if [[ "$TS_ZOXIDE_RANKING" != "0" ]] && [[ -d "$selected" ]] && command -v zoxide &>/dev/null; then
+  zoxide add -- "$selected" &>/dev/null
+fi
+
+sid=$(session_id_for "$selected_name")
+if [[ -z "$sid" ]]; then
+  sid=$(rex new "$selected_name" --cwd "$selected" --json | jq -r .session_id)
+  sleep 0.3 # give the app a moment to see the new session before switching
+  hydrate "$sid" "$selected"
+fi
+
+switch_to "$sid"
+close_popup
