@@ -3,14 +3,15 @@
 
 choice=$(
   printf '%s\n' \
-    $'\033[38;2;126;191;80m  nvim\033[0m\t~/dotfiles/nvim' \
-    $'\033[38;2;187;154;247m  rex\033[0m\t~/dotfiles/rex/init.lua' \
-    $'\033[38;2;27;185;31m  tmux\033[0m\t~/dotfiles/tmux/tmux.conf' \
-    $'\033[38;2;106;90;204m  zshrc\033[0m\t~/dotfiles/zsh/.zshrc' \
-    $'\033[38;2;53;81;243m󰊠  ghostty\033[0m\t~/dotfiles/ghostty/config' \
-    $'\033[38;2;187;154;247m  Toggle AI sound\033[0m\tsound' |
-    fzf --ansi --reverse --cycle --no-info \
-      --bind "j:down,k:up" \
+    $'\033[38;2;126;191;80m  nvim\033[0m \033[2m(n)\033[0m\t~/dotfiles/nvim' \
+    $'\033[38;2;187;154;247m  rex\033[0m \033[2m(r)\033[0m\t~/dotfiles/rex/init.lua' \
+    $'\033[38;2;27;185;31m  tmux\033[0m \033[2m(t)\033[0m\t~/dotfiles/tmux/tmux.conf' \
+    $'\033[38;2;106;90;204m  zshrc\033[0m \033[2m(z)\033[0m\t~/dotfiles/zsh/.zshrc' \
+    $'\033[38;2;53;81;243m󰊠  ghostty\033[0m \033[2m(g)\033[0m\t~/dotfiles/ghostty/config' \
+    $'\033[38;2;187;154;247m  Toggle AI sound\033[0m \033[2m(s)\033[0m\tsound' |
+    fzf --ansi --reverse --cycle --no-info --disabled \
+      --bind "j:down,k:up,q:abort" \
+      --bind "n:pos(1)+accept,r:pos(2)+accept,t:pos(3)+accept,z:pos(4)+accept,g:pos(5)+accept,s:pos(6)+accept" \
       --color "prompt:#7AA2f7,pointer:#7AA2f7,header:#7AA2f7" \
       --border=rounded --border-label=" rexdots " --border-label-pos=0 \
       --delimiter=$'\t' --with-nth=1 \
@@ -19,10 +20,29 @@ choice=$(
 
 target=$(cut -f2 <<< "$choice")
 
+# open FILE in nvim in a bigger popup; the menu closes below
+edit() {
+  if [[ -z "$REX_BLOCK" ]]; then nvim "$1"; return; fi
+  REXDOTS_FILE="$1" rex do -s "$REX_SESSION" -e '
+    rex.session.new_layer({
+      bounds = { 0.075, 0.075, 0.85, 0.85 },
+      focus = true,
+      layout = rex.layout.block({
+        flavor = "com.superlogical.terminal.shell",
+        label = "Rexdots",
+        options = { command = { "zsh", "-lc", "nvim \"$0\"", os.getenv("REXDOTS_FILE") } },
+      }),
+    })' &>/dev/null
+}
+
 case "$target" in
   "") ;;
-  sound) ~/.local/bin/senu sound toggle ;;
-  *) nvim "${target/#\~/$HOME}" ;;
+  sound)
+    clear
+    ~/.local/bin/senu sound toggle
+    read -rsn1 -t 3
+    ;;
+  *) edit "${target/#\~/$HOME}" ;;
 esac
 
 [[ -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null
