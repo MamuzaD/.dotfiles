@@ -96,7 +96,7 @@ local function popup(name, title, w, h, command)
 				layout = rex.layout.block({
 					flavor = "com.superlogical.terminal.shell",
 					label = title,
-					options = { command = command, cwd = cwd(ctx) },
+					options = { command = type(command) == "function" and command(ctx) or command, cwd = cwd(ctx) },
 				}),
 			})
 		end,
@@ -107,7 +107,16 @@ local home = os.getenv("HOME")
 
 -- popups
 -- sessionser
-popup("rexionizer", "Rexionizer", 0.65, 0.65, { "zsh", "-lc", "REX_POPUP=1 rexionizer" })
+popup("rexionizer", "Rexionizer", 0.65, 0.65, function(ctx)
+	-- A session can be open on several devices. Target the one that opened the popup.
+	return {
+		"env",
+		"REX_CLIENT=" .. assert(ctx.client_id, "rexionizer needs an originating client"),
+		"zsh",
+		"-lc",
+		"REX_POPUP=1 rexionizer",
+	}
+end)
 rex.bind(P .. "f", "rexionizer")
 popup("rexshuffle", "Rexshuffle", 0.5, 0.5, { "zsh", "-lc", "rexshuffle" })
 rex.bind(P .. "m", "rexshuffle")

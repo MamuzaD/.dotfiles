@@ -38,7 +38,7 @@ close_popup() {
 
 switch_to() {
   rex do -e 'rex.client.queue("session.select", { session_id = rex.args.sid })' sid="$1" ||
-    { echo "turn on Remote Control in Rex Settings > Rex Server"; read -rn1; }
+    { echo "Session switch failed. Check the Rex error above. For manual launches, set REX_CLIENT to your client's label or ID."; read -rn1; }
 }
 
 # label<TAB>session_id, skipping the session we're in
