@@ -15,7 +15,7 @@ gui:
     activeBorderColor:
       - "#7AA2F7"
       - bold
-  authorColors: {} # fill if you want per-author colors
+    authorColors: {} # fill if you want per-author colors
   skipHookPrefix: "skip-ci" # skip hooks
   # ui
   nerdFontsVersion: "3"
