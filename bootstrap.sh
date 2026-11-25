@@ -36,14 +36,15 @@ link() {
 # ghostty | alacritty
 # link "$DOTFILES_DIR/ghostty/config" "$XDG_CONFIG_HOME/ghostty/config"
 # link "$DOTFILES_DIR/alacritty" "$XDG_CONFIG_HOME/alacritty"
-link "$DOTFILES_DIR/rex/init.lua" "$XDG_CONFIG_HOME/rex/init.lua"
-link "$DOTFILES_DIR/rex/rexionizer" "$LOCAL_BIN/rexionizer"
-link "$DOTFILES_DIR/rex/rexshuffle" "$LOCAL_BIN/rexshuffle"
-link "$DOTFILES_DIR/rex/rexdots" "$LOCAL_BIN/rexdots"
+# link "$DOTFILES_DIR/rex/init.lua" "$XDG_CONFIG_HOME/rex/init.lua"
+# link "$DOTFILES_DIR/rex/rexionizer" "$LOCAL_BIN/rexionizer"
+# link "$DOTFILES_DIR/rex/rexshuffle" "$LOCAL_BIN/rexshuffle"
+# link "$DOTFILES_DIR/rex/rexdots" "$LOCAL_BIN/rexdots"
 
 # --- zsh ---
 # link "$DOTFILES_DIR/zsh/.zshrc" "$HOME/.zshrc"
 # link "$DOTFILES_DIR/zsh/.zshenv" "$HOME/.zshenv"
+# link "$DOTFILES_DIR/zsh/.zprofile" "$HOME/.zprofile"
 
 # --- nvim ---
 # link "$DOTFILES_DIR/nvim" "$XDG_CONFIG_HOME/nvim"

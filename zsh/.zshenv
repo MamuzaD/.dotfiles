@@ -5,19 +5,74 @@ typeset -U path
 # xdg
 export XDG_CONFIG_HOME="$HOME/.config"
 
-# for local scripts
-export PATH="$HOME/.local/bin:$PATH"
+# editor
+export EDITOR=nvim
+export SUDO_EDITOR=nvim
+
+# homebrew
+if [[ -d /opt/homebrew ]]; then
+  export HOMEBREW_PREFIX="/opt/homebrew"
+  export HOMEBREW_CELLAR="/opt/homebrew/Cellar"
+  export HOMEBREW_REPOSITORY="/opt/homebrew"
+  path=(/opt/homebrew/bin /opt/homebrew/sbin $path)
+  [[ -z "${MANPATH-}" ]] || export MANPATH=":${MANPATH#:}"
+  export INFOPATH="/opt/homebrew/share/info:${INFOPATH:-}"
+fi
 
 # rust
-[[ -f "$HOME/.cargo/env" ]] && . "$HOME/.cargo/env"
+[[ -d "$HOME/.cargo/bin" ]] && path=("$HOME/.cargo/bin" $path)
 
-# bob (nvim)
-[[ -f "$HOME/.local/share/bob/env/env.sh" ]] && . "$HOME/.local/share/bob/env/env.sh"
+# bob
+[[ -d "$HOME/.local/share/bob/nvim-bin" ]] && path=("$HOME/.local/share/bob/nvim-bin" $path)
 
-# fnm (brew on mac, ~/.local/share/fnm on linux)
-[[ -d /opt/homebrew/bin ]] && export PATH="/opt/homebrew/bin:$PATH"
-[[ -d "$HOME/.local/share/fnm" ]] && export PATH="$HOME/.local/share/fnm:$PATH"
-# non-interactive only, .zshrc handles interactive
-if [[ ! -o interactive ]] && command -v fnm >/dev/null 2>&1; then
-  eval "$(fnm env --shell zsh)"
+# go
+[[ -d /usr/local/go/bin ]] && path=(/usr/local/go/bin $path)
+[[ -d "$HOME/go/bin" ]] && path=("$HOME/go/bin" $path)
+
+# bun
+[[ -d "$HOME/.bun/bin" ]] && path=("$HOME/.bun/bin" $path)
+
+# opencode
+[[ -d "$HOME/.opencode/bin" ]] && path=("$HOME/.opencode/bin" $path)
+
+case "$OSTYPE" in
+  darwin*)
+    # pnpm
+    export PNPM_HOME="$HOME/Library/pnpm"
+    [[ -d "$PNPM_HOME/bin" ]] && path=("$PNPM_HOME/bin" $path)
+
+    # latex
+    texlive_bin=(/usr/local/texlive/*/bin/universal-darwin(N/On[1]))
+    (( $#texlive_bin )) && path=("$texlive_bin[1]" $path)
+    unset texlive_bin
+
+    # java
+    if [[ -d /opt/homebrew/opt/openjdk@21 ]]; then
+      export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+      path=("$JAVA_HOME/bin" $path)
+    fi
+    ;;
+  linux*)
+    # pnpm
+    export PNPM_HOME="$HOME/.local/share/pnpm"
+    [[ -d "$PNPM_HOME" ]] && path=("$PNPM_HOME" $path)
+    ;;
+esac
+
+# fnm
+[[ -d "$HOME/.local/share/fnm" ]] && path=("$HOME/.local/share/fnm" $path)
+if [[ ! -o interactive && -d "$HOME/.local/share/fnm/aliases/default/bin" ]]; then
+  path=("$HOME/.local/share/fnm/aliases/default/bin" $path)
 fi
+
+# local scripts
+path=("$HOME/.local/bin" $path)
+
+# wsl
+if [[ -n "${WSL_DISTRO_NAME-}" ]]; then
+  export COLORTERM=truecolor
+  command -v win-zen >/dev/null 2>&1 && export BROWSER="win-zen"
+fi
+
+# local
+[[ -f "$HOME/dotfiles/zsh/.zshenv.local" ]] && source "$HOME/dotfiles/zsh/.zshenv.local"

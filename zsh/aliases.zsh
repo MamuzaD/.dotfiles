@@ -1,12 +1,16 @@
-
-alias ls='eza -1a --icons --git --group-directories-first'
-alias lsg='eza -ga --icons --git --group-directories-first'
+if command -v eza >/dev/null 2>&1; then
+  alias ls='eza -1a --icons --git --group-directories-first'
+  alias lsg='eza -ga --icons --git --group-directories-first'
+fi
 alias vim='nvim'
 alias v='nvim'
 alias ts="tmux-sessionizer"
 alias rx="rexionizer"
 
-# lazygit (cd to last repo on quit)
+# openers
+[[ $OSTYPE == darwin* ]] && alias chrome='open -a "Google Chrome"'
+
+# lazygit
 lg() {
   local dir_file="$(mktemp -u)"
   LAZYGIT_NEW_DIR_FILE="$dir_file" lazygit "$@"
