@@ -6,12 +6,10 @@ CONFIG_FILE="$CONFIG_DIR/tmux-sessionizer.conf"
 
 # config file example
 # ------------------------
-# # file: ~/.config/tmux-sessionizer/tmux-sessionizer.conf
+# # file: ~/.config/tmux/tmux-sessionizer.conf
 # # If set this override the default TS_SEARCH_PATHS (~/ ~/personal ~/personal/dev/env/.config)
 # TS_SEARCH_PATHS=(~/)
-# # If set this add additional search paths to the default TS_SEARCH_PATHS
-# # The number prefix is the depth for the Path [OPTIONAL]
-# TS_EXTRA_SEARCH_PATHS=(~/ghq:3 ~/Git:3 ~/.config:2)
+# # A path can end in :number to set its search depth
 # # if set this override the TS_MAX_DEPTH (1)
 # TS_MAX_DEPTH=2
 # # Set to 0 to keep directory choices alphabetically sorted instead of using zoxide frecency
@@ -86,14 +84,6 @@ bump_session_use_count() {
 }
 
 sanity_check
-
-# Add any extra search paths to the TS_SEARCH_PATHS array
-# e.g : EXTRA_SEARCH_PATHS=("$HOME/extra1:4" "$HOME/extra2")
-# note : Path can be suffixed with :number to limit or extend the depth of the search for the Path
-
-if [[ ${#TS_EXTRA_SEARCH_PATHS[@]} -gt 0 ]]; then
-  TS_SEARCH_PATHS+=("${TS_EXTRA_SEARCH_PATHS[@]}")
-fi
 
 # vars
 tmux_sessions_count=$(tmux list-sessions -F "[TMUX] #{session_name}" 2>/dev/null | awk 'END {print NR}')

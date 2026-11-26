@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # rexionizer: rex port of tmux-sessionizer
-# reuses ~/.config/tmux/tmux-sessionizer.conf for search paths
+# same defaults as tmux-sessionizer, and the same optional ~/.config/tmux/tmux-sessionizer.conf
 # lists sessions from this server and every `rex hosts` entry (rex -S <host>)
 # switching needs Remote Control on (Rex Settings > Rex Server)
 
@@ -20,10 +20,6 @@ TS_SESSION_RANKING=1
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck source=/dev/null
   source "$CONFIG_FILE"
-fi
-
-if [[ ${#TS_EXTRA_SEARCH_PATHS[@]} -gt 0 ]]; then
-  TS_SEARCH_PATHS+=("${TS_EXTRA_SEARCH_PATHS[@]}")
 fi
 
 for cmd in rex fzf jq; do
@@ -236,7 +232,7 @@ c_rex=$'\033[38;2;158;206;106m' # green -> [REX] sessions
 c_new=$'\033[38;2;122;162;247m' # blue  -> [NEW]
 c_del=$'\033[38;2;247;118;142m' # red   -> [DEL] / [ALL]
 c_dir=$'\033[38;2;192;202;245m' # fg    -> directories
-c_dim=$'\033[38;2;86;95;137m' # comment -> server name, use-count suffix
+c_dim=$'\033[38;2;86;95;137m'   # comment -> server name, use-count suffix
 
 colorize_list() {
   sed -E \
@@ -275,7 +271,10 @@ resolve_client() {
   if [[ "$REX_CLIENT" == client:* ]]; then
     for h in "$LOCAL_SERVER" "${HOSTS[@]}"; do
       label=$(rex_on "$h" client inspect "$REX_CLIENT" --json 2>/dev/null | jq -r '.client.info.label // empty')
-      [[ -n "$label" ]] && { export REX_CLIENT=$label; return; }
+      [[ -n "$label" ]] && {
+        export REX_CLIENT=$label
+        return
+      }
     done
   fi
   [[ -n "$REX_CLIENT" ]] && return
@@ -340,7 +339,11 @@ pick_server() {
 switch_to() {
   local server=$1 sid=$2
   pick_client
-  [[ -z "$REX_CLIENT" ]] && { echo "No client chosen; not switching."; read -rn1; return 1; }
+  [[ -z "$REX_CLIENT" ]] && {
+    echo "No client chosen; not switching."
+    read -rn1
+    return 1
+  }
   if rex_on "$server" -C "$REX_CLIENT" do session.select session_id="$sid"; then
     [[ "$sid" != "$current_session" ]] && update_count "$sid" 1 "$(date +%s)"
   else
@@ -399,7 +402,10 @@ if [[ "$selected" == "[DEL]" ]]; then
     load_sessions # also refreshes the hooks' cached listing
     [[ -z "$(rex_sessions)" ]] && break
     to_del=$(
-      (echo "[ALL]"; rex_sessions) |
+      (
+        echo "[ALL]"
+        rex_sessions
+      ) |
         sed -E -e "s/^\[ALL\]$/${c_del}[ALL]${c_reset}/;t" -e "s/^([^:]+): (.+)$/${c_dim}\1:${c_reset} ${c_rex}\2${c_reset}/" |
         fzf "${fzf_default_opts[@]}" --prompt "del > " \
           --preview 'case {} in "[ALL]") echo "Kill every listed session, on every server" ;; *) e={}; rex_on "${e%%: *}" capture -s "${e#*: }" --format vt --trim 2>/dev/null | tr -d "\r" | tail -n "$FZF_PREVIEW_LINES" ;; esac'
