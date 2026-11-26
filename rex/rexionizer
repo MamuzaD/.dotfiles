@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # rexionizer: rex port of tmux-sessionizer
 # reuses ~/.config/tmux/tmux-sessionizer.conf for search paths
+# lists sessions from this server and every `rex hosts` entry (rex -S <host>)
 # switching needs Remote Control on (Rex Settings > Rex Server)
 
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)/$(basename "${BASH_SOURCE[0]}")"
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux-sessionizer.conf"
+# Rex has no per-session options like tmux's @key, so counts live in a side file:
+# session_id<TAB>count<TAB>last_switch_epoch (session ids are unique across servers)
+COUNTS_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/rexionizer/counts"
 
 TS_SEARCH_PATHS=(~/ ~/personal)
 TS_EXTRA_SEARCH_PATHS=()
 TS_SPECIFIC_PATHS=()
 TS_MAX_DEPTH=1
 TS_ZOXIDE_RANKING=1
+TS_SESSION_RANKING=1
 
 if [[ -f "$CONFIG_FILE" ]]; then
   # shellcheck source=/dev/null
@@ -28,29 +34,140 @@ for cmd in rex fzf jq; do
   fi
 done
 
-current_session="${REX_SESSION:-none}"
+mkdir -p "$(dirname "$COUNTS_FILE")"
+touch "$COUNTS_FILE"
 
-# close the popup this runs in (floating layers don't always close on exit).
-# REX_POPUP is set by the init.lua popup; REX_BLOCK alone is set in every pane
-close_popup() {
-  [[ -n "$REX_POPUP" && -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null
+# one view of our session: its id (skipped in listings) and this pane's owner,
+# the client you're typing on
+view=$(rex api call -s "$REX_BLOCK" session.view 2>/dev/null)
+current_session=$(jq -r '.session_id // empty' <<<"$view" 2>/dev/null)
+current_session="${current_session:-none}"
+
+# servers
+# ------------------------
+LOCAL_SERVER=$(hostname -s) # load_sessions swaps in our host label, if we have one
+export LOCAL_SERVER
+HOSTS=()
+
+# rex against SERVER
+rex_on() {
+  local server=$1
+  shift
+  if [[ "$server" == "$LOCAL_SERVER" ]]; then
+    rex "$@"
+  else
+    rex --timeout 3s -S "$server" "$@"
+  fi
+}
+export -f rex_on
+
+# fills SESSIONS with server<TAB>label<TAB>session_id from every server, asked in
+# parallel so an offline host only costs its timeout. A host with our host_id is
+# this machine under another name (the Mac's hostname is "Mac", its host glamdring):
+# its label names our sessions and it leaves HOSTS.
+load_sessions() {
+  local tmp me host id i=0 hosts=()
+  tmp=$(mktemp -d)
+  me=$(rex whoami --json 2>/dev/null | jq -r '.host_id // empty')
+  rex ls --json 2>/dev/null | jq -r '.sessions[] | "\(.label)\t\(.session_id)"' >"$tmp/local"
+  for host in "${HOSTS[@]}"; do
+    i=$((i + 1))
+    {
+      id=$(rex_on "$host" whoami --json 2>/dev/null | jq -r '.host_id // empty')
+      if [[ -n "$id" && "$id" == "$me" ]]; then
+        echo "$host" >>"$tmp/self"
+      elif [[ -n "$id" ]]; then
+        rex_on "$host" ls --json 2>/dev/null |
+          jq -r --arg s "$host" '.sessions[] | "\($s)\t\(.label)\t\(.session_id)"' >"$tmp/$i"
+      fi
+    } &
+  done
+  wait
+  if [[ -s "$tmp/self" ]]; then
+    LOCAL_SERVER=$(head -1 "$tmp/self")
+    while IFS= read -r host; do
+      [[ "$(grep -cxF -- "$host" "$tmp/self")" -eq 0 ]] && hosts+=("$host")
+    done < <(printf '%s\n' "${HOSTS[@]}")
+    HOSTS=("${hosts[@]}")
+  fi
+  SESSIONS=$({
+    awk -v s="$LOCAL_SERVER" -v OFS='\t' '{ print s, $0 }' "$tmp/local"
+    cat "$tmp"/[0-9]* 2>/dev/null
+  } | awk -F'\t' '!seen[$3]++') # two entries for one machine list it once
+  rm -rf "$tmp"
+  export LOCAL_SERVER REXIONIZER_SESSIONS="$SESSIONS" # for previews and the hooks
 }
 
-switch_to() {
-  rex do -e 'rex.client.queue("session.select", { session_id = rex.args.sid })' sid="$1" ||
-    { echo "Session switch failed. Check the Rex error above. For manual launches, set REX_CLIENT to your client's label or ID."; read -rn1; }
-}
+# the ctrl-w/ctrl-s hooks reuse fzf's listing instead of asking every host again
+if [[ -n "${REXIONIZER_SESSIONS:-}" ]]; then
+  SESSIONS=$REXIONIZER_SESSIONS
+else
+  hosts_json=$(rex hosts list --json 2>/dev/null)
+  while IFS= read -r h; do # no mapfile: macOS ships bash 3.2
+    [[ -n "$h" ]] && HOSTS+=("$h")
+  done < <(jq -r '.hosts[].host.label' <<<"$hosts_json")
+  load_sessions
+fi
 
-# label<TAB>session_id, skipping the session we're in
+# "server: label" for every session except the one we're in
 rex_sessions() {
-  rex ls --json | jq -r --arg cur "$current_session" \
-    '.sessions[] | select(.session_id != $cur) | "\(.label)\t\(.session_id)"'
+  awk -F'\t' -v cur="$current_session" '$3 != cur { print $1 ": " $2 }' <<<"$SESSIONS"
 }
 
+# "server: label" -> server<TAB>session_id
+session_for() {
+  awk -F'\t' -v e="$1" '$1 ": " $2 == e { print $1 "\t" $3; exit }' <<<"$SESSIONS"
+}
+
+# session id for a label on a server (this one by default)
 session_id_for() {
-  rex ls --json | jq -r --arg l "$1" '.sessions[] | select(.label == $l) | .session_id' | head -n1
+  awk -F'\t' -v s="${2:-$LOCAL_SERVER}" -v l="$1" '$1 == s && $2 == l { print $3; exit }' <<<"$SESSIONS"
 }
 
+# ranking
+# ------------------------
+# add delta to a session's count, floored at 0, and drop entries for sessions that
+# are gone and unused for 30 days (an offline host's sessions are missing from the
+# listing, so dropping on that alone would wipe their counts).
+# stamp, when given, records the switch time used to break ties.
+update_count() {
+  local sid="$1" delta="$2" stamp="${3:-}" tmp
+  [[ -n "$sid" ]] || return 0
+  [[ -n "$SESSIONS" ]] || return 0 # a failed listing must not wipe the counts
+
+  tmp=$(mktemp "$COUNTS_FILE.XXXXXX") || return 0
+  awk -F '\t' -v OFS='\t' -v sid="$sid" -v delta="$delta" -v stamp="$stamp" -v cutoff="$(($(date +%s) - 30 * 86400))" '
+    FILENAME == ARGV[1] { live[$3] = 1; next }
+    $1 == sid {
+      seen = 1
+      n = $2 + delta
+      print sid, (n < 0 ? 0 : n), (stamp != "" ? stamp : $3)
+      next
+    }
+    live[$1] || $3 > cutoff { print }
+    END { if (!seen) print sid, (delta < 0 ? 0 : delta + 0), stamp + 0 }
+  ' <(printf "%s\n" "$SESSIONS") "$COUNTS_FILE" >"$tmp" && mv "$tmp" "$COUNTS_FILE" || rm -f "$tmp"
+}
+
+# "[REX] server: label (count)" lines, most used first, then most recently switched to
+list_rex_sessions() {
+  local lines
+  lines=$(
+    awk -F '\t' -v OFS='\t' -v cur="$current_session" '
+      FILENAME == ARGV[1] { count[$1] = $2; last[$1] = $3; next }
+      $3 != cur { print count[$3] + 0, last[$3] + 0, $1 ": " $2 }
+    ' "$COUNTS_FILE" <(printf "%s\n" "$SESSIONS")
+  )
+  [[ -n "$lines" ]] || return 0
+  if [[ "$TS_SESSION_RANKING" == "0" ]]; then
+    printf "%s\n" "$lines" | sort -t $'\t' -k3,3
+  else
+    printf "%s\n" "$lines" | sort -t $'\t' -k1,1nr -k2,2nr -k3,3
+  fi | awk -F '\t' '{ printf "[REX] %s (%s)\n", $3, $1 }'
+}
+
+# list
+# ------------------------
 hydrate() {
   if [ -f "$2/.tmux-sessionizer" ]; then
     rex send -s "$1" "source $2/.tmux-sessionizer"$'\n'
@@ -60,7 +177,7 @@ hydrate() {
 }
 
 find_dirs() {
-  rex_sessions | cut -f1 | sed 's/^/[REX] /'
+  list_rex_sessions
   echo "[NEW]"
   [[ -n "$(rex_sessions)" ]] && echo "[DEL]"
 
@@ -107,8 +224,8 @@ find_dirs() {
 fzf_preview='
   case {} in
     "[NEW]") echo "Create a new session" ;;
-    "[DEL]") echo "Delete a session"; rex ls ;;
-    "[REX]"*) rex capture -s "$(echo {} | sed "s/^\[REX\] //")" 2>/dev/null | tail -n "$FZF_PREVIEW_LINES" ;;
+    "[DEL]") echo "Delete a session" ;;
+    "[REX]"*) e=$(echo {} | sed -E "s/^\[REX\] (.*) \([0-9]+\)$/\1/"); rex_on "${e%%: *}" capture -s "${e#*: }" --format vt --trim 2>/dev/null | tr -d "\r" | tail -n "$FZF_PREVIEW_LINES" ;;
     "~"*) eza -1a --icons --git --group-directories-first --color=always "$(echo {} | sed "s|^~|$HOME|")" ;;
     *) echo "No preview available" ;;
   esac
@@ -119,17 +236,121 @@ c_rex=$'\033[38;2;158;206;106m' # green -> [REX] sessions
 c_new=$'\033[38;2;122;162;247m' # blue  -> [NEW]
 c_del=$'\033[38;2;247;118;142m' # red   -> [DEL] / [ALL]
 c_dir=$'\033[38;2;192;202;245m' # fg    -> directories
+c_dim=$'\033[38;2;86;95;137m' # comment -> server name, use-count suffix
 
 colorize_list() {
   sed -E \
-    -e "s/^(\[REX\]) (.+)$/${c_rex}\1${c_reset} \2/;t" \
+    -e "s/^(\[REX\]) ([^:]+): (.+) (\([0-9]+\))$/${c_rex}\1${c_reset} ${c_dim}\2:${c_reset} \3 ${c_dim}\4${c_reset}/;t" \
     -e "s/^\[NEW\]$/${c_new}[NEW]${c_reset}/;t" \
     -e "s/^\[DEL\]$/${c_del}[DEL]${c_reset}/;t" \
     -e "s/^(.+)$/${c_dir}\1${c_reset}/"
 }
 
-current_label=$(rex ls --json | jq -r --arg cur "$current_session" '.sessions[] | select(.session_id == $cur) | .label')
-total=$(rex ls --json | jq '.sessions | length')
+# internal hooks for the ctrl-w/ctrl-s fzf bindings below
+if [[ "$1" == "--bump" ]]; then
+  if [[ "$2" =~ ^\[REX\]\ (.*)\ \([0-9]+\)$ ]]; then
+    IFS=$'\t' read -r _ sid <<<"$(session_for "${BASH_REMATCH[1]}")"
+    update_count "$sid" "$3"
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "--list" ]]; then
+  find_dirs | colorize_list
+  exit 0
+fi
+
+# clients
+# ------------------------
+# The device to switch, as a client *label*: the same app is a different client
+# (ID) on every server, but -C takes a label anywhere. REX_CLIENT comes from the
+# init.lua popup; else this pane's owner; else the only connected app.
+app_clients() {
+  rex client ls --json | jq -c '[.clients[] | select(.info.kind == "app" and .connection_state == "connected")]'
+}
+
+resolve_client() {
+  local id h label
+  # an ID only means something on the server that issued it: swap it for its label
+  if [[ "$REX_CLIENT" == client:* ]]; then
+    for h in "$LOCAL_SERVER" "${HOSTS[@]}"; do
+      label=$(rex_on "$h" client inspect "$REX_CLIENT" --json 2>/dev/null | jq -r '.client.info.label // empty')
+      [[ -n "$label" ]] && { export REX_CLIENT=$label; return; }
+    done
+  fi
+  [[ -n "$REX_CLIENT" ]] && return
+  id=$(jq -r --arg b "$REX_BLOCK" 'first(.. | objects | select(.block_id == $b and (.owner // "") != "") | .owner) // empty' <<<"$view" 2>/dev/null)
+  [[ -z "$id" ]] && id=$(app_clients | jq -r 'if length == 1 then .[0].client_id else empty end')
+  [[ -n "$id" ]] && export REX_CLIENT=$(rex client inspect "$id" --json | jq -r '.client.info.label // .client.client_id')
+}
+
+# ambiguous: let the user choose which device to switch
+pick_client() {
+  [[ -n "$REX_CLIENT" ]] && return
+  local pick
+  pick=$(app_clients | jq -r '.[] | "\(.info.label // .client_id)\t\(.info.platform)"' |
+    fzf "${fzf_default_opts[@]}" --prompt "client > " --delimiter '\t' --no-preview)
+  [[ -n "$pick" ]] && export REX_CLIENT="${pick%%$'\t'*}"
+}
+
+resolve_client
+
+# remote dirs
+# ------------------------
+# runs on each host: the path $1 under HOME, matching each part ignoring case
+# (~/Code/projs/senu on the Mac is ~/code/projs/senu on sr8)
+remote_dir='
+  p=$HOME IFS=/
+  for c in $1; do
+    if [ -e "$p/$c" ]; then m=$c; else m=$(ls -A "$p" 2>/dev/null | grep -ixF -- "$c" | head -n1); fi
+    [ -n "$m" ] || exit 0
+    p=$p/$m
+  done
+  [ -d "$p" ] && echo "$p"
+'
+
+# sets server/path to where DIR's session should start. If a host reachable over
+# ssh has the same path under its HOME (asked in parallel), asks which to use.
+pick_server() {
+  local dir=$1 rel tmp host ep i=0 choices pick
+  server=$LOCAL_SERVER path=$dir
+  rel=${dir#"$HOME"/}
+  [[ ${#HOSTS[@]} -eq 0 || "$rel" == "$dir" ]] && return 0
+  tmp=$(mktemp -d)
+  for host in "${HOSTS[@]}"; do
+    ep=$(jq -r --arg l "$host" \
+      'first(.hosts[] | select(.host.label == $l) | .host.endpoints[]? | select(startswith("ssh://"))) // empty' <<<"$hosts_json")
+    [[ -z "$ep" ]] && continue
+    i=$((i + 1))
+    { p=$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$ep" "sh -c $(printf %q "$remote_dir") sh $(printf %q "$rel")") &&
+      [[ -n "$p" ]] && printf '%s\t%s\n' "$host" "$p" >"$tmp/$i"; } &
+  done
+  wait
+  choices=$(cat "$tmp"/* 2>/dev/null)
+  rm -rf "$tmp"
+  [[ -z "$choices" ]] && return 0
+  pick=$(printf '%s\t%s\n%s\n' "$LOCAL_SERVER" "$dir" "$choices" |
+    awk -F'\t' -v OFS='\t' '{ d = $2; sub("^/(Users|home)/[^/]+", "~", d); print $1, $2, $1 ": " d }' |
+    fzf "${fzf_default_opts[@]}" --prompt "start on > " --delimiter '\t' --with-nth 3 --no-preview) || return 1
+  IFS=$'\t' read -r server path _ <<<"$pick"
+}
+
+# actions
+# ------------------------
+switch_to() {
+  local server=$1 sid=$2
+  pick_client
+  [[ -z "$REX_CLIENT" ]] && { echo "No client chosen; not switching."; read -rn1; return 1; }
+  if rex_on "$server" -C "$REX_CLIENT" do session.select session_id="$sid"; then
+    [[ "$sid" != "$current_session" ]] && update_count "$sid" 1 "$(date +%s)"
+  else
+    echo "Couldn't switch $REX_CLIENT on $server. Is it connected there with Remote Control on?"
+    read -rn1
+  fi
+}
+
+current_label=$(awk -F'\t' -v cur="$current_session" '$3 == cur { print $2; exit }' <<<"$SESSIONS")
+total=$(grep -c . <<<"$SESSIONS")
 
 fzf_default_opts=(
   --ansi
@@ -142,8 +363,9 @@ fzf_default_opts=(
   --reverse
   --no-sort
   --cycle
+  --with-shell "bash -c" # previews call the exported rex_on
   --prompt="> "
-  --header="Current Session: ${current_label:-none} | Total: $total"
+  --header="Session: ${current_label:-none} | Client: ${REX_CLIENT:-?} | Total: $total"
 )
 
 if [[ $# -eq 1 ]]; then
@@ -151,12 +373,14 @@ if [[ $# -eq 1 ]]; then
 else
   selected=$(
     find_dirs | colorize_list | fzf "${fzf_default_opts[@]}" \
+      --header="$(printf 'Session: %s | Client: %s\nTotal: %s | ctrl-w/ctrl-s: rank up/down' "${current_label:-none}" "${REX_CLIENT:-?}" "$total")" \
+      --bind "ctrl-w:execute-silent($SELF --bump {} +1)+reload($SELF --list)" \
+      --bind "ctrl-s:execute-silent($SELF --bump {} -1)+reload($SELF --list)" \
       --preview "$fzf_preview" --preview-window='right,60%'
   )
 fi
 
 if [[ -z $selected ]]; then
-  close_popup
   exit 0
 fi
 
@@ -165,34 +389,38 @@ if [[ "$selected" == "[NEW]" ]]; then
   if [[ -n "$session_name" ]]; then
     sid=$(rex new "$session_name" --json | jq -r .session_id)
     sleep 0.3 # give the app a moment to see the new session before switching
-    switch_to "$sid"
+    switch_to "$LOCAL_SERVER" "$sid"
   fi
-  close_popup
   exit 0
 fi
 
 if [[ "$selected" == "[DEL]" ]]; then
   while true; do
+    load_sessions # also refreshes the hooks' cached listing
+    [[ -z "$(rex_sessions)" ]] && break
     to_del=$(
-      (echo "[ALL]"; rex_sessions | cut -f1) |
-        sed -E -e "s/^\[ALL\]$/${c_del}[ALL]${c_reset}/;t" -e "s/^(.+)$/${c_rex}\1${c_reset}/" |
+      (echo "[ALL]"; rex_sessions) |
+        sed -E -e "s/^\[ALL\]$/${c_del}[ALL]${c_reset}/;t" -e "s/^([^:]+): (.+)$/${c_dim}\1:${c_reset} ${c_rex}\2${c_reset}/" |
         fzf "${fzf_default_opts[@]}" --prompt "del > " \
-          --preview 'rex capture -s {} 2>/dev/null | tail -n "$FZF_PREVIEW_LINES"'
+          --preview 'case {} in "[ALL]") echo "Kill every listed session, on every server" ;; *) e={}; rex_on "${e%%: *}" capture -s "${e#*: }" --format vt --trim 2>/dev/null | tr -d "\r" | tail -n "$FZF_PREVIEW_LINES" ;; esac'
     )
     [[ -z "$to_del" ]] && break
     if [[ "$to_del" == "[ALL]" ]]; then
-      rex_sessions | cut -f2 | xargs rex kill &>/dev/null
+      while IFS= read -r e; do
+        IFS=$'\t' read -r server sid <<<"$(session_for "$e")"
+        rex_on "$server" kill "$sid" &>/dev/null
+      done < <(rex_sessions)
       break
     fi
-    rex kill "$(session_id_for "$to_del")" &>/dev/null
+    IFS=$'\t' read -r server sid <<<"$(session_for "$to_del")"
+    rex_on "$server" kill "$sid" &>/dev/null
   done
-  close_popup
   exit 0
 fi
 
-if [[ "$selected" =~ ^\[REX\]\ (.*)$ ]]; then
-  switch_to "$(session_id_for "${BASH_REMATCH[1]}")"
-  close_popup
+if [[ "$selected" =~ ^\[REX\]\ (.*)\ \([0-9]+\)$ ]]; then
+  IFS=$'\t' read -r server sid <<<"$(session_for "${BASH_REMATCH[1]}")"
+  switch_to "$server" "$sid"
   exit 0
 fi
 
@@ -203,12 +431,21 @@ if [[ "$TS_ZOXIDE_RANKING" != "0" ]] && [[ -d "$selected" ]] && command -v zoxid
   zoxide add -- "$selected" &>/dev/null
 fi
 
-sid=$(session_id_for "$selected_name")
-if [[ -z "$sid" ]]; then
-  sid=$(rex new "$selected_name" --cwd "$selected" --json | jq -r .session_id)
-  sleep 0.3 # give the app a moment to see the new session before switching
-  hydrate "$sid" "$selected"
+pick_server "$selected" || exit 0
+
+if [[ "$server" == "$LOCAL_SERVER" ]]; then
+  sid=$(session_id_for "$selected_name")
+  if [[ -z "$sid" ]]; then
+    sid=$(rex new "$selected_name" --cwd "$selected" --json | jq -r .session_id)
+    sleep 0.3 # give the app a moment to see the new session before switching
+    hydrate "$sid" "$selected"
+  fi
+else
+  sid=$(session_id_for "$selected_name" "$server")
+  if [[ -z "$sid" ]]; then
+    sid=$(rex_on "$server" new "$selected_name" --cwd "$path" --json | jq -r .session_id)
+    sleep 0.3
+  fi
 fi
 
-switch_to "$sid"
-close_popup
+switch_to "$server" "$sid"

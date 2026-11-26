@@ -20,17 +20,18 @@ choice=$(
 
 target=$(cut -f2 <<< "$choice")
 
-# open FILE in nvim in a bigger popup; the menu closes below
+# open FILE in nvim in a bigger popup; this menu's popup closes when it exits
 edit() {
   if [[ -z "$REX_BLOCK" ]]; then nvim "$1"; return; fi
-  REXDOTS_FILE="$1" rex do -s "$REX_SESSION" -e '
+  # an env var, not file=PATH: rex do reads any argument with a slash as a script path
+  REXDOTS_FILE="$1" rex do -s "$REX_BLOCK" -e '
     rex.session.new_layer({
       bounds = { 0.075, 0.075, 0.85, 0.85 },
       focus = true,
       layout = rex.layout.block({
         flavor = "com.superlogical.terminal.shell",
         label = "Rexdots",
-        options = { command = { "zsh", "-lc", "nvim \"$0\"", os.getenv("REXDOTS_FILE") } },
+        options = { command = { "nvim", os.getenv("REXDOTS_FILE") } },
       }),
     })' &>/dev/null
 }
@@ -44,5 +45,3 @@ case "$target" in
     ;;
   *) edit "${target/#\~/$HOME}" ;;
 esac
-
-[[ -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null

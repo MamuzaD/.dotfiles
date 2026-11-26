@@ -20,7 +20,7 @@ rex.bind(P .. "c", "client.tab.new")
 rex.bind(P .. "n", "client.tab.next")
 rex.bind(P .. "p", "client.tab.previous")
 rex.bind(P .. ",", "client.tab.rename")
--- rex has no close confirm yet, fake tmux's kill-window y/n with a mode
+-- rex's own close confirm only covers busy programs, so always ask y/n with a mode
 rex.mode("confirm_close", { exclusive = true })
 rex.bind(P .. "shift+7", "client.mode.enter", { name = "confirm_close", once = true })
 rex.bind("confirm_close/y", "client.tab.close")
@@ -52,18 +52,11 @@ rex.bind(P .. "shift+k", "afterkill")
 rex.bind(P .. "shift+5", "pane.split", { direction = "right" })
 rex.bind(P .. "shift+'", "pane.split", { direction = "down" })
 rex.bind(P .. "z", "pane.zoom")
--- pane.close is broken when bound in init.lua (rex bug), close via the server
-rex.action({
-	name = "close_pane",
-	title = "Close Pane",
-	run = function(ctx)
-		rex.call("block.close", { session_id = ctx.session_id, block_id = ctx.block_id })
-	end,
-})
 -- same y/n confirm as ctrl+b & (see confirm_close above)
+-- pane.close does nothing when bound in init.lua (rex bug), client.close works
 rex.mode("confirm_close_pane", { exclusive = true })
 rex.bind(P .. "x", "client.mode.enter", { name = "confirm_close_pane", once = true })
-rex.bind("confirm_close_pane/y", "close_pane")
+rex.bind("confirm_close_pane/y", "client.close")
 rex.bind("confirm_close_pane/n", "client.mode.exit")
 
 -- vim-like pane switching
@@ -84,19 +77,36 @@ local function cwd(ctx)
 	end
 end
 
-local function popup(name, title, w, h, command)
+-- the pressing client's label. ctx.client_id is an ID on the server running this
+-- config (the client's home), which means nothing on the session's server, but
+-- -C/REX_CLIENT accept a label anywhere
+local function client_label(ctx)
+	local r = ctx.client_id and rex.call("client.inspect", { client_id = ctx.client_id })
+	return r and r.client and r.client.info and r.client.info.label or ctx.client_id
+end
+
+-- command runs through the login shell of the session's machine, so bare names
+-- resolve there. with_client passes REX_CLIENT for scripts that drive the app.
+-- the terminal closes when the command exits (but stays open on a quick failure)
+local function popup(name, title, w, h, command, with_client)
 	rex.action({
 		name = name,
 		title = title,
 		category = "Popups",
 		run = function(ctx)
+			local cmd = command
+			-- no label (no pressing client): leave REX_CLIENT unset, the script resolves one
+			local label = with_client and client_label(ctx)
+			if label then
+				cmd = { "env", "REX_CLIENT=" .. label, unpack(command) }
+			end
 			rex.session.new_layer({
 				bounds = { (1 - w) / 2, (1 - h) / 2, w, h },
 				focus = true,
 				layout = rex.layout.block({
 					flavor = "com.superlogical.terminal.shell",
 					label = title,
-					options = { command = type(command) == "function" and command(ctx) or command, cwd = cwd(ctx) },
+					options = { command = cmd, cwd = cwd(ctx) },
 				}),
 			})
 		end,
@@ -107,31 +117,23 @@ local home = os.getenv("HOME")
 
 -- popups
 -- sessionser
-popup("rexionizer", "Rexionizer", 0.65, 0.65, function(ctx)
-	-- A session can be open on several devices. Target the one that opened the popup.
-	return {
-		"env",
-		"REX_CLIENT=" .. assert(ctx.client_id, "rexionizer needs an originating client"),
-		"zsh",
-		"-lc",
-		"REX_POPUP=1 rexionizer",
-	}
-end)
+popup("rexionizer", "Rexionizer", 0.65, 0.65, { "rexionizer" }, true)
 rex.bind(P .. "f", "rexionizer")
-popup("rexshuffle", "Rexshuffle", 0.5, 0.5, { "zsh", "-lc", "rexshuffle" })
+popup("rexshuffle", "Rexshuffle", 0.5, 0.5, { "rexshuffle" })
 rex.bind(P .. "m", "rexshuffle")
+-- these need a shell: $HOME must expand on the session's machine / a pipe
 popup("lazygit", "Lazygit", 0.9, 0.9, { "zsh", "-lc", "XDG_CONFIG_HOME=$HOME/.config lazygit" })
 rex.bind(P .. "g", "lazygit")
 popup("list_keys", "List Keys", 0.8, 0.8, { "zsh", "-lc", "rex keymap | fzf" })
 rex.bind(P .. "shift+/", "list_keys")
-popup("wallpaper", "Wallpaper", 0.5, 0.45, { home .. "/.local/bin/wallpaper" })
+popup("wallpaper", "Wallpaper", 0.5, 0.45, { "wallpaper" })
 rex.bind(P .. "w", "wallpaper")
 -- senu
-popup("senu_threads", "Senu Threads", 0.65, 0.6, { home .. "/.local/bin/senu", "threads", "--live" })
+popup("senu_threads", "Senu Threads", 0.65, 0.6, { "senu", "threads", "--live" }, true)
 rex.bind(P .. "a", "senu_threads")
-popup("senu_vision", "Senu Vision", 0.65, 0.7, { home .. "/.local/bin/senu", "vision" })
+popup("senu_vision", "Senu Vision", 0.75, 0.75, { "senu", "vision" }, true)
 rex.bind(P .. "u", "senu_vision")
 
 -- menu
-popup("rexdots", "Rexdots", 0.5, 0.45, { "zsh", "-lc", "rexdots" })
+popup("rexdots", "Rexdots", 0.5, 0.45, { "rexdots" })
 rex.bind(P .. "d", "rexdots")

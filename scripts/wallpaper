@@ -1,6 +1,17 @@
 #!/usr/bin/env zsh
 set -euo pipefail
 
+# fzf can't relay viu's kitty probe, so previews point the terminal at a cached
+# PNG thumbnail instead (kitty t=f): one short escape instead of ~400KB of pixels
+if [[ "${1:-}" == --preview ]]; then
+  thumb="${XDG_CACHE_HOME:-$HOME/.cache}/wallpaper-previews/${2:t}.png"
+  if [[ ! "$thumb" -nt "$2" ]]; then
+    mkdir -p "${thumb:h}"
+    magick "${2}[0]" -resize '600x600>' -strip "$thumb"
+  fi
+  printf '\e_Ga=T,f=100,t=f,q=2,c=%d;%s\e\\\n' "$FZF_PREVIEW_COLUMNS" "$(print -rn -- "$thumb" | base64)"
+  exit 0
+fi
 
 DIR="$HOME/Pictures/Wallpapers"
 
@@ -36,6 +47,10 @@ if ! command -v fzf >/dev/null 2>&1; then
   exit 1
 fi
 
+preview="${(q)${0:A}} --preview {2}"
+# tmux popups don't forward graphics; viu falls back to text art there
+[[ -n "${TMUX:-}" ]] && preview='viu -w ${FZF_PREVIEW_COLUMNS} -h ${FZF_PREVIEW_LINES} {2}'
+
 selected="$(
   for f in "${files[@]}"; do
     f_abs="${f:A}"
@@ -57,7 +72,7 @@ selected="$(
     --height=100% \
     --cycle \
     --header="Current: ${current:t}" \
-    --preview='viu -w ${FZF_PREVIEW_COLUMNS} -h ${FZF_PREVIEW_LINES} {2}' \
+    --preview="$preview" \
     --preview-window=right:60%
 )" || exit 0
 
@@ -72,7 +87,7 @@ osascript -e "tell application \"System Events\" to repeat with d in desktops
   set picture of d to POSIX file \"${escaped}\"
 end repeat"
 
-if [[ -n "$TMUX" ]]; then
+if [[ -n "${TMUX:-}" ]]; then
   tmux display-message -d 300 "wallpaper: ${chosen:t}"
 else
   print "wallpaper set to: ${chosen:t}"

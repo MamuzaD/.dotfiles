@@ -2,17 +2,13 @@
 # rexshuffle: rex port of tmux-window-swapper
 # swap or reorder the current tab within the same session
 
-if [[ -z $REX_SESSION ]]; then
+# a block ID works anywhere a session goes
+if [[ -z $REX_BLOCK ]]; then
   echo "Must be run inside a rex session."
   exit 1
 fi
 
-close_popup() {
-  [[ -n "$REX_BLOCK" ]] && rex block close "$REX_BLOCK" &>/dev/null
-}
-trap close_popup EXIT
-
-view=$(rex api call -s "$REX_SESSION" session.view)
+view=$(rex api call -s "$REX_BLOCK" session.view)
 current_window_id=$(jq -r .active_window_id <<< "$view")
 total_windows=$(jq '.windows | length' <<< "$view")
 
@@ -69,39 +65,18 @@ action=$(
       --header="[$current_window_index] $current_window → [$selected_window_index] $selected_window_name"
 )
 
-# place window $1 just before window $2 (or at the end when $2 is empty)
-move_before() {
-  local args
-  # adjacent tabs: the first move already swapped them
-  [[ "$1" == "$2" ]] && return
-  if [[ -n "$2" ]]; then
-    args=$(jq -nc --arg w "$1" --arg b "$2" '{window_id: $w, before_window_id: $b}')
-  else
-    args=$(jq -nc --arg w "$1" '{window_id: $w}')
-  fi
-  rex api call -s "$REX_SESSION" session.move_window "$args" >/dev/null
-}
-
-# the window id after position $1 (1-based) in the original order
-id_after() {
-  awk -F '\t' -v i="$1" '$2 == i + 1 { print $1 }' <<< "$windows"
+# rex window move takes a 1-based --index. moving cur to sel's slot shifts the tabs
+# in between, which is "move"; moving sel back to cur's old slot then makes it a swap
+move_to() {
+  rex window move -s "$REX_BLOCK" "$1" --index "$2" >/dev/null
 }
 
 case "${action%%$'\t'*}" in
   swap)
-    if (( current_window_index < selected_window_index )); then
-      move_before "$current_window_id" "$(id_after "$selected_window_index")"
-      move_before "$selected_window_id" "$(id_after "$current_window_index")"
-    else
-      move_before "$selected_window_id" "$(id_after "$current_window_index")"
-      move_before "$current_window_id" "$(id_after "$selected_window_index")"
-    fi
+    move_to "$current_window_id" "$selected_window_index"
+    move_to "$selected_window_id" "$current_window_index"
     ;;
   move)
-    if (( current_window_index < selected_window_index )); then
-      move_before "$current_window_id" "$(id_after "$selected_window_index")"
-    else
-      move_before "$current_window_id" "$selected_window_id"
-    fi
+    move_to "$current_window_id" "$selected_window_index"
     ;;
 esac
