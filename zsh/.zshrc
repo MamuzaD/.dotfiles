@@ -29,5 +29,8 @@ if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook zsh)"
 fi
 
+# bun completions (PATH is in .zshenv)
+[[ -s "$HOME/.bun/_bun" ]] && source "$HOME/.bun/_bun"
+
 # local
 [[ -f "$HOME/dotfiles/zsh/.zshrc.local" ]] && source "$HOME/dotfiles/zsh/.zshrc.local"

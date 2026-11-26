@@ -74,5 +74,9 @@ if [[ -n "${WSL_DISTRO_NAME-}" ]]; then
   command -v win-zen >/dev/null 2>&1 && export BROWSER="win-zen"
 fi
 
+# privacy: opt out of telemetry (DO_NOT_TRACK is honored by many CLIs)
+export DO_NOT_TRACK=1
+export T3CODE_TELEMETRY_ENABLED=false
+
 # local
 [[ -f "$HOME/dotfiles/zsh/.zshenv.local" ]] && source "$HOME/dotfiles/zsh/.zshenv.local"
