@@ -296,32 +296,57 @@ resolve_client
 
 # remote dirs
 # ------------------------
-# runs on each host: the path $1 under HOME, matching each part ignoring case
-# (~/Code/projs/senu on the Mac is ~/code/projs/senu on sr8)
-remote_dir='
-  p=$HOME IFS=/
-  for c in $1; do
-    if [ -e "$p/$c" ]; then m=$c; else m=$(ls -A "$p" 2>/dev/null | grep -ixF -- "$c" | head -n1); fi
-    [ -n "$m" ] || exit 0
-    p=$p/$m
-  done
-  [ -d "$p" ] && echo "$p"
-'
+# list_dir on HOST, run by the terminal block SID/BID on that machine
+# (~ is that machine's home). PREFIX narrows to names starting with it, any case.
+list_dir_on() {
+  local host=$1 sid=$2 bid=$3 dir=$4 prefix=${5:-}
+  rex_on "$host" api call com.superlogical.terminal.list_dir "$(
+    jq -nc --arg s "$sid" --arg b "$bid" --arg p "$dir" --arg x "$prefix" \
+      '{session_id: $s, block_id: $b, args: (if $x == "" then {path: $p, limit: 1} else {path: $p, prefix: $x} end)}'
+  )" </dev/null 2>/dev/null
+}
 
-# sets server/path to where DIR's session should start. If a host reachable over
-# ssh has the same path under its HOME (asked in parallel), asks which to use.
+# HOST's absolute path for ~/REL, matching each part ignoring case
+# (~/Code/projs/senu on the Mac is ~/code/projs/senu on sr8). Asks through a
+# terminal block in one of HOST's sessions, so HOST needs a session open.
+remote_path() {
+  local host=$1 rel=$2 sid bid out st p c m parts
+  IFS=/ read -ra parts <<<"$rel"
+  while IFS= read -r sid; do
+    while IFS= read -r bid; do
+      out=$(list_dir_on "$host" "$sid" "$bid" "~/$rel") || continue
+      st=$(jq -r '.status // empty' <<<"$out" 2>/dev/null)
+      case $st in
+        ok) jq -r .path <<<"$out"; return 0 ;;
+        missing) ;;
+        "") continue ;; # not a terminal block, try the next
+        *) return 0 ;;
+      esac
+      p="~"
+      for c in "${parts[@]}"; do
+        m=$(list_dir_on "$host" "$sid" "$bid" "$p" "$c" |
+          jq -r --arg c "$c" 'first(.entries[]? | select((.name | ascii_downcase) == ($c | ascii_downcase)) | .name) // empty')
+        [[ -n "$m" ]] || return 0
+        p="$p/$m"
+      done
+      list_dir_on "$host" "$sid" "$bid" "$p" | jq -r 'select(.status == "ok") | .path'
+      return 0
+    done < <(rex_on "$host" api call -s "$sid" session.view </dev/null 2>/dev/null |
+      jq -r '[.. | objects | .block_id? // empty] | unique[]')
+  done < <(awk -F'\t' -v h="$host" '$1 == h { print $3 }' <<<"$SESSIONS")
+}
+
+# sets server/path to where DIR's session should start. If another host has the
+# same path under its HOME (asked in parallel through rex), asks which to use.
 pick_server() {
-  local dir=$1 rel tmp host ep i=0 choices pick
+  local dir=$1 rel tmp host i=0 choices pick
   server=$LOCAL_SERVER path=$dir
   rel=${dir#"$HOME"/}
   [[ ${#HOSTS[@]} -eq 0 || "$rel" == "$dir" ]] && return 0
   tmp=$(mktemp -d)
   for host in "${HOSTS[@]}"; do
-    ep=$(jq -r --arg l "$host" \
-      'first(.hosts[] | select(.host.label == $l) | .host.endpoints[]? | select(startswith("ssh://"))) // empty' <<<"$hosts_json")
-    [[ -z "$ep" ]] && continue
     i=$((i + 1))
-    { p=$(ssh -o BatchMode=yes -o ConnectTimeout=2 "$ep" "sh -c $(printf %q "$remote_dir") sh $(printf %q "$rel")") &&
+    { p=$(remote_path "$host" "$rel") &&
       [[ -n "$p" ]] && printf '%s\t%s\n' "$host" "$p" >"$tmp/$i"; } &
   done
   wait
