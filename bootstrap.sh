@@ -80,3 +80,7 @@ for script in "$DOTFILES_DIR"/scripts/*; do
     :
   fi
 done
+
+# --- package managers (7-day release cooldown) ---
+link "$DOTFILES_DIR/npm/npmrc" "$HOME/.npmrc"
+link "$DOTFILES_DIR/pnpm/config.yaml" "$XDG_CONFIG_HOME/pnpm/config.yaml"

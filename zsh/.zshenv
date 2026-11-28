@@ -7,7 +7,6 @@ export XDG_CONFIG_HOME="$HOME/.config"
 
 # editor
 export EDITOR=nvim
-export SUDO_EDITOR=nvim
 
 # homebrew
 if [[ -d /opt/homebrew ]]; then
@@ -55,7 +54,7 @@ case "$OSTYPE" in
   linux*)
     # pnpm
     export PNPM_HOME="$HOME/.local/share/pnpm"
-    [[ -d "$PNPM_HOME" ]] && path=("$PNPM_HOME" $path)
+    [[ -d "$PNPM_HOME/bin" ]] && path=("$PNPM_HOME/bin" $path)
     ;;
 esac
 
@@ -67,6 +66,9 @@ fi
 
 # local scripts
 path=("$HOME/.local/bin" $path)
+
+# sudoedit: full path, since sudo's secure_path skips ~/.local/share/bob
+export SUDO_EDITOR="${commands[nvim]:-nvim}"
 
 # wsl
 if [[ -n "${WSL_DISTRO_NAME-}" ]]; then
