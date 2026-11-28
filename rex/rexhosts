@@ -1,0 +1,385 @@
+#!/usr/bin/env bash
+# rexhosts: what rexionizer knows about the other `rex hosts`
+# config: the same ~/.config/tmux/tmux-sessionizer.conf as rexionizer
+#
+#   rexhosts server          our host label (the Mac's is glamdring, not its hostname)
+#   rexhosts local           this machine's sessions
+#   rexhosts sessions        every host's sessions (for debugging)
+#   rexhosts where DIR [T]   host<TAB>path for each other host that has DIR
+#   rexhosts list T          list every host's sessions into run dir T
+#   rexhosts prefetch T      list, resolve $REX_CLIENT, and index other hosts' dirs into T
+
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/tmux/tmux-sessionizer.conf"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/rexhosts"
+# throwaway session for asking a host with none open, labelled PROBE-<epoch> so
+# a concurrent run's live probe isn't mistaken for a leftover
+PROBE=rexhosts-probe
+
+TS_SEARCH_PATHS=(~/ ~/personal)
+TS_SPECIFIC_PATHS=()
+TS_MAX_DEPTH=1
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+fi
+
+# our host label from last listing
+LOCAL_SERVER=$(cat "$STATE_DIR/server" 2>/dev/null)
+LOCAL_SERVER=${LOCAL_SERVER:-$(hostname -s)}
+
+ALL_HOSTS=()
+load_hosts() {
+  local h
+  while IFS= read -r h; do # no mapfile: macOS ships bash 3.2
+    [[ -n "$h" ]] && ALL_HOSTS+=("$h")
+  done < <(rex hosts list --json 2>/dev/null | jq -r '.hosts[].host.label')
+}
+
+# rex against SERVER
+rex_on() {
+  local server=$1
+  shift
+  if [[ "$server" == "$LOCAL_SERVER" ]]; then
+    rex "$@"
+  else
+    rex --timeout 3s -S "$server" "$@"
+  fi
+}
+
+# wait up to SECS for FILE to appear
+wait_for() {
+  local n=$((${2:-5} * 20))
+  while [[ ! -e "$1" ]] && ((n-- > 0)); do sleep 0.05; done
+  [[ -e "$1" ]]
+}
+
+# sessions
+# ------------------------
+local_sessions() {
+  rex ls --json 2>/dev/null |
+    jq -r --arg s "$LOCAL_SERVER" --arg p "$PROBE" '.sessions[] | select(.label | startswith($p) | not) | "\($s)\t\(.label)\t\(.session_id)"'
+}
+
+# HOST's host_id and sessions, asked at once, into OUT.id and OUT.ls
+fetch_host() {
+  local host=$1 out=$2
+  rex_on "$host" whoami --json 2>/dev/null | jq -r '.host_id // empty' >"$out.id" &
+  rex_on "$host" ls --json 2>/dev/null |
+    jq -r --arg s "$host" '.sessions[] | "\($s)\t\(.label)\t\(.session_id)"' >"$out.ls" &
+  wait
+}
+
+# run dir T, shared with rexionizer:
+#   sessions   server<TAB>label<TAB>session_id for every host (written last: the ready marker)
+#   server     our host label
+#   hosts      n<TAB>host for every other reachable host
+#   client     label for $REX_CLIENT, when another host issued that ID
+#   h<n>.idx   host n's dirs (see index_host)
+#
+# asks every host in parallel (an offline one costs its timeout) and writes the
+# listing into T. A host with our host_id is this machine under another name:
+# its label names our sessions and it leaves the host list.
+# May run twice at once on one T (prefetch and rexionizer's [DEL]): each call
+# works in its own dir, waits only on its own jobs, and moves files into place.
+list_all() {
+  local T=$1 D me id n server=$(hostname -s) self= pids=()
+  D=$(mktemp -d "$T/list.XXXXXX")
+  me=$(rex whoami --json 2>/dev/null | jq -r '.host_id // empty')
+  for n in "${!ALL_HOSTS[@]}"; do
+    fetch_host "${ALL_HOSTS[n]}" "$D/h$n" &
+    pids+=($!)
+  done
+  [[ ${#pids[@]} -gt 0 ]] && wait "${pids[@]}" # only ours: a bare wait would also wait on prefetch's jobs
+  : >"$D/hosts"
+  for n in "${!ALL_HOSTS[@]}"; do
+    id=$(cat "$D/h$n.id" 2>/dev/null)
+    if [[ -n "$id" && "$id" == "$me" ]]; then
+      [[ -z "$self" ]] && self=${ALL_HOSTS[n]}
+    elif [[ -n "$id" ]]; then
+      printf '%s\t%s\n' "$n" "${ALL_HOSTS[n]}" >>"$D/hosts"
+      mv "$D/h$n.ls" "$T/h$n.ls"
+    fi
+  done
+  server=${self:-$server}
+  LOCAL_SERVER=$server
+  echo "$server" >"$D/server" && mv "$D/server" "$T/server"
+  mkdir -p "$STATE_DIR" && echo "$server" >"$STATE_DIR/server"
+  mv "$D/hosts" "$T/hosts"
+  {
+    local_sessions
+    while IFS=$'\t' read -r n _; do cat "$T/h$n.ls"; done <"$T/hosts"
+  } | awk -F'\t' -v p="$PROBE" 'index($2, p) != 1 && !seen[$3]++' >"$D/sessions" # drop probes; one machine under two names is listed once
+  mv "$D/sessions" "$T/sessions"
+  rm -rf "$D"
+}
+
+# clients
+# ------------------------
+# a client ID only means something on the server that issued it (the Mac's
+# popup hands over glamdring's ID); writes its label into T/client
+resolve_client() {
+  local T=$1 id=$2 n l
+  [[ "$id" == client:* ]] || return 0
+  for n in "${!ALL_HOSTS[@]}"; do
+    {
+      l=$(rex_on "${ALL_HOSTS[n]}" client inspect "$id" --json </dev/null 2>/dev/null | jq -r '.client.info.label // empty')
+      [[ -n "$l" ]] && echo "$l" >"$T/client"
+    } &
+  done
+  wait
+}
+
+# remote dirs
+# ------------------------
+# list_dir on HOST, run by the terminal block SID/BID on that machine
+# (~ is that machine's home). PREFIX narrows to names starting with it, any case;
+# "*" lists everything. Without PREFIX it asks for one entry (an existence check).
+list_dir_on() {
+  local host=$1 sid=$2 bid=$3 dir=$4 prefix=${5:-}
+  rex_on "$host" api call com.superlogical.terminal.list_dir "$(
+    jq -nc --arg s "$sid" --arg b "$bid" --arg p "$dir" --arg x "$prefix" \
+      '{session_id: $s, block_id: $b, args: (if $x == "" then {path: $p, limit: 1} elif $x == "*" then {path: $p} else {path: $p, prefix: $x} end)}'
+  )" </dev/null 2>/dev/null
+}
+
+# a terminal block in HOST's session SID (the one that answers list_dir)
+term_block() {
+  local host=$1 sid=$2 bid
+  while IFS= read -r bid; do
+    list_dir_on "$host" "$sid" "$bid" "~" | jq -e '.status' &>/dev/null && {
+      echo "$bid"
+      return 0
+    }
+  done < <(rex_on "$host" api call -s "$sid" session.view </dev/null 2>/dev/null |
+    jq -r '[.. | objects | .block_id? // empty] | unique[]')
+  return 1
+}
+
+# HOST's absolute path for ~/REL, asked through block SID/BID, matching each part
+# ignoring case (~/Code/projs/senu on the Mac is ~/code/projs/senu on sr8).
+# Prints nothing when the path isn't there; fails (2) when HOST didn't answer,
+# so a timeout is never taken for "not there".
+resolve_on() {
+  local host=$1 sid=$2 bid=$3 rel=$4 out p c m parts
+  out=$(list_dir_on "$host" "$sid" "$bid" "~/$rel")
+  case $(jq -r '.status // empty' <<<"$out" 2>/dev/null) in
+    ok) jq -r .path <<<"$out"; return 0 ;;
+    missing) ;;
+    *) return 2 ;;
+  esac
+  IFS=/ read -ra parts <<<"$rel"
+  p="~"
+  for c in "${parts[@]}"; do
+    out=$(list_dir_on "$host" "$sid" "$bid" "$p" "$c")
+    jq -e '.status == "ok"' <<<"$out" &>/dev/null || return 2
+    m=$(jq -r --arg c "$c" 'first(.entries[]? | select((.name | ascii_downcase) == ($c | ascii_downcase)) | .name) // empty' <<<"$out")
+    [[ -n "$m" ]] || return 0
+    p="$p/$m"
+  done
+  out=$(list_dir_on "$host" "$sid" "$bid" "$p")
+  case $(jq -r '.status // empty' <<<"$out" 2>/dev/null) in
+    ok) jq -r .path <<<"$out" ;;
+    missing) ;;
+    *) return 2 ;;
+  esac
+}
+
+# sets sid/bid to a terminal block on HOST, from LINES (its sessions as
+# server<TAB>label<TAB>id), else from a probe session it opens (probe=its id).
+# Probes are never borrowed (another run may be about to kill its own); ones
+# over a minute old are a killed run's leftovers, collected in stale.
+find_block() {
+  local host=$1 lines=$2 label s tries now
+  sid= bid= probe= stale=()
+  now=$(date +%s)
+  while IFS=$'\t' read -r _ label s; do
+    [[ -n "$s" ]] || continue
+    if [[ "$label" == "$PROBE"* ]]; then
+      [[ "${label#"$PROBE"-}" =~ ^[0-9]+$ ]] && ((now - ${label#"$PROBE"-} < 60)) || stale+=("$s")
+      continue
+    fi
+    [[ -z "$bid" ]] && bid=$(term_block "$host" "$s") && sid=$s
+  done <<<"$lines"
+  [[ -n "$bid" ]] && return 0
+  probe=$(rex_on "$host" new "$PROBE-$now" --json </dev/null 2>/dev/null | jq -r '.session_id // empty')
+  [[ -n "$probe" ]] || return 1
+  for tries in 1 2 3 4 5; do # the new terminal can take a moment to answer
+    bid=$(term_block "$host" "$probe") && sid=$probe && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+kill_probes() {
+  local host=$1 s
+  for s in $probe "${stale[@]}"; do rex_on "$host" kill "$s" &>/dev/null </dev/null; done
+}
+
+# index_host's lines for search path entry E (path or path:depth); reads
+# index_host's host/sid/bid/out
+index_path() {
+  local e=$1 path=$1 depth=$TS_MAX_DEPTH rel dir list
+  [[ "$e" =~ ^([^:]+):([0-9]+)$ ]] && path=${BASH_REMATCH[1]} depth=${BASH_REMATCH[2]}
+  [[ "${depth:-1}" == 1 ]] || return 0
+  path=${path%/}
+  if [[ "$path" == "$HOME" ]]; then
+    rel= dir="~"
+  elif [[ "$path" == "$HOME"/* ]]; then
+    rel=${path#"$HOME"/}
+    dir=$(resolve_on "$host" "$sid" "$bid" "$rel") || {
+      touch "$out.err" # HOST didn't answer: leave it to the live lookup
+      return 0
+    }
+  else
+    return 0
+  fi
+  if [[ -z "$dir" ]]; then
+    printf 'C\t%s\n' "$rel" # not on HOST: covered, nothing under it
+    return 0
+  fi
+  list=$(list_dir_on "$host" "$sid" "$bid" "$dir" "*")
+  if jq -e '.status == "ok" and (.truncated | not)' <<<"$list" &>/dev/null; then
+    printf 'C\t%s\n' "$rel"
+    jq -r --arg r "$rel" '.path as $p | .entries[] | "E\t\($r)\t\($p)\t\(.name)"' <<<"$list"
+  else
+    jq -e '.truncated' <<<"$list" &>/dev/null || touch "$out.err"
+  fi
+}
+
+# index_host's line for specific path entry E; reads index_host's host/sid/bid/out
+index_specific() {
+  local path rel
+  path=$(eval echo "$1")
+  path=${path%/}
+  [[ "$path" == "$HOME"/* ]] || return 0
+  rel=${path#"$HOME"/}
+  if path=$(resolve_on "$host" "$sid" "$bid" "$rel"); then
+    printf 'S\t%s\t%s\n' "$rel" "$path"
+  else
+    touch "$out.err" # HOST didn't answer: no line, so it's asked live
+  fi
+}
+
+# writes OUT.idx: what HOST has at the specific paths and under each depth-1
+# search path, as
+#   S<TAB>rel<TAB>abs            HOST's abs path for ~/rel ("" if it has none)
+#   C<TAB>rel                    rel (relative to ~, "" for ~ itself) is covered
+#   E<TAB>rel<TAB>abs<TAB>name   HOST's abs path for rel holds dir name
+# Paths it can't cover (deeper searches, a truncated listing, HOST not
+# answering) get no line, so where asks about those live. An index with any
+# unanswered question isn't cached.
+# Always run in its own subshell: its variables aren't local, so the EXIT trap
+# still sees them after it returns.
+index_host() {
+  host=$1 out=$2 sid= bid= probe= stale=()
+  # always leave an idx, even empty, so where stops waiting and asks live
+  trap 'kill_probes "$host"; [[ -e "$out.idx" ]] || : >"$out.idx"' EXIT
+  find_block "$host" "$(cat "$out.ls")" || exit 0
+  local i=0
+  for e in "${TS_SEARCH_PATHS[@]}"; do # each path asked in parallel
+    i=$((i + 1))
+    index_path "$e" >"$out.p$i" &
+  done
+  for e in "${TS_SPECIFIC_PATHS[@]}"; do
+    i=$((i + 1))
+    index_specific "$e" >"$out.p$i" &
+  done
+  wait
+  for ((; i > 0; i--)); do cat "$out.p$i"; done >"$out.idx.tmp"
+  [[ -s "$out.idx.tmp" && ! -e "$out.err" ]] && mkdir -p "$STATE_DIR" &&
+    cp "$out.idx.tmp" "$STATE_DIR/idx.$host.$$" && mv "$STATE_DIR/idx.$host.$$" "$STATE_DIR/idx.$host"
+  mv "$out.idx.tmp" "$out.idx"
+}
+
+# HOST's absolute path for ~/REL, asked live (for dirs the index doesn't cover)
+remote_path() {
+  local T=$1 host=$2 rel=$3 sid bid probe stale
+  find_block "$host" "$(awk -F'\t' -v h="$host" '$1 == h' "$T/sessions")" &&
+    resolve_on "$host" "$sid" "$bid" "$rel"
+  kill_probes "$host"
+}
+
+# host<TAB>abs for each other host in T's listing that has DIR under its home:
+# from this run's index, else last run's (dirs rarely change), else this run's
+# once it's done (when WAIT, i.e. a prefetch is writing one), else asked live
+where() {
+  local T=$1 dir=$2 wait=$3 rel parent name n host idx p
+  rel=${dir#"$HOME"/}
+  [[ "$rel" == "$dir" ]] && return 0
+  parent=${rel%/*} name=${rel##*/}
+  [[ "$parent" == "$rel" ]] && parent=
+  while IFS=$'\t' read -r n host; do
+    idx="$T/h$n.idx"
+    [[ ! -e "$idx" && -s "$STATE_DIR/idx.$host" ]] && idx="$STATE_DIR/idx.$host"
+    [[ -n "$wait" ]] && wait_for "$idx" 15
+    if p=$(awk -F'\t' -v r="$rel" '$1 == "S" && $2 == r { print $3; f = 1; exit } END { exit !f }' "$idx" 2>/dev/null); then
+      :
+    elif awk -F'\t' -v r="$parent" '$1 == "C" && $2 == r { c = 1; exit } END { exit !c }' "$idx" 2>/dev/null; then
+      p=$(awk -F'\t' -v r="$parent" -v n="$name" '$1 == "E" && $2 == r && tolower($4) == tolower(n) { print $3 "/" $4; exit }' "$idx")
+    else
+      p=$(remote_path "$T" "$host" "$rel")
+    fi
+    [[ -n "$p" ]] && printf '%s\t%s\n' "$host" "$p"
+  done <"$T/hosts"
+}
+
+# commands
+# ------------------------
+usage() {
+  sed -n '2,/^$/{s/^# \{0,1\}//;p;}' "${BASH_SOURCE[0]}" >&2
+  exit 2
+}
+
+cmd=$1
+shift
+case $cmd in
+  server)
+    echo "$LOCAL_SERVER"
+    ;;
+  local)
+    local_sessions
+    ;;
+  sessions)
+    T=$(mktemp -d)
+    trap 'rm -rf "$T"' EXIT
+    load_hosts
+    list_all "$T"
+    cat "$T/sessions"
+    ;;
+  list)
+    [[ -d "$1" ]] || usage
+    load_hosts
+    list_all "$1"
+    ;;
+  where)
+    [[ -n "$1" ]] || usage
+    dir=${1/#\~/$HOME}
+    if [[ -d "$2" ]]; then
+      wait_for "$2/sessions" 8
+      where "$2" "$dir" wait
+    else
+      T=$(mktemp -d)
+      trap 'rm -rf "$T"' EXIT
+      load_hosts
+      list_all "$T"
+      where "$T" "$dir"
+    fi
+    ;;
+  prefetch)
+    # ignore HUP: keep running after the popup closes, so probes still get killed.
+    # Touches T/prefetch.done when finished; whichever of us and rexionizer
+    # (T/main.done) finishes last removes T.
+    trap '' HUP
+    T=$1
+    [[ -d "$T" ]] || usage
+    load_hosts
+    resolve_client "$T" "$REX_CLIENT" &
+    list_all "$T"
+    while IFS=$'\t' read -r n h; do (index_host "$h" "$T/h$n") & done <"$T/hosts"
+    wait
+    touch "$T/prefetch.done"
+    [[ -e "$T/main.done" ]] && rm -rf "$T"
+    ;;
+  *) usage ;;
+esac
+exit 0
